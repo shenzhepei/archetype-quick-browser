@@ -1,0 +1,4 @@
+interface:
+  display_name: "Quick Browser 文档规范"
+  short_description: "维护 PRD 与详细设计的编号、配对和目录规范"
+  default_prompt: "使用 $docs-conventions 创建或整理 Quick Browser 的 PRD 与详细设计，并校验编号和链接。"
