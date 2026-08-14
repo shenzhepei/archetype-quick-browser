@@ -24,8 +24,8 @@
 |------|---------|------|
 | 平台 | macOS 14+、Apple Silicon | 收窄窗口、字体和发布变量 |
 | 语言 | Rust stable，锁定 `rust-toolchain.toml` | 与总体架构一致 |
-| UI | iced + winit | 复用总体选型 |
-| GPU | wgpu，同进程渲染 | 先验证显示链路，V4 再拆进程 |
+| UI | GPUI + gpui-component | 使用原生 GPU UI、成熟组件和主题系统 |
+| GPU | GPUI Metal 后端，同进程渲染 | 先验证显示链路，V4 再拆进程 |
 | HTML 解析 | html5ever | 避免首版自研容错解析器 |
 | CSS 解析 | cssparser + selectors | 聚焦自研级联、布局和绘制 |
 | 网络 | hyper + rustls + tokio | 使用成熟网络与 TLS 实现 |
@@ -50,15 +50,15 @@ flowchart LR
   DOM --> Style
   Style --> Layout[arch-layout]
   Layout --> Paint[arch-paint]
-  Paint --> Gfx[arch-gfx]
-  Gfx --> Surface[wgpu surface]
+  Paint --> UIAdapter[arch-browser GPUI adapter]
+  UIAdapter --> Surface[GPUI Metal surface]
 ```
 
 ### 3.1 V3 crate 集合
 
 | Crate | V3 职责 | 不负责 |
 |-------|---------|--------|
-| `arch-browser` | 窗口、Space、地址栏、导航命令、错误页 | 网页排版规则 |
+| `arch-browser` | GPUI 窗口、Space、地址栏、导航命令、错误页、DisplayList 展示 | 网页排版规则 |
 | `arch-session` | 页面列表、导航历史、选中状态 | DOM 快照、JS 冻结 |
 | `arch-store` | SQLite schema、事务、迁移 | 页面正文缓存 |
 | `arch-net` | GET、重定向、超时、响应体限制 | Cookie、认证、下载 |
@@ -68,9 +68,12 @@ flowchart LR
 | `arch-style` | 匹配、级联、继承、初始值 | 动画和伪元素 |
 | `arch-layout` | 块、行内、文本换行、盒模型 | Flex/Grid/定位/浮动 |
 | `arch-paint` | 背景、边框、文本、图片 DisplayList | 合成动画和滤镜 |
-| `arch-gfx` | DisplayList 到 wgpu、滚动视口 | 独立 GPU 进程 |
 
 V3 不创建 `arch-js`、`arch-policy`、`arch-sync`、`arch-pod` 或 `arch-ai` 的占位实现。
+
+V3 不单独创建 `arch-gfx` 占位 crate；`arch-browser` 将只读 DisplayList 适配为 GPUI 元素并使用 GPUI 滚动容器。后续拆分 Renderer/GPU 进程时，以 DisplayList 边界替换该适配层。
+
+开发构建启用 GPUI `runtime_shaders`，避免依赖额外的 Xcode Metal Toolchain 组件；发布构建在性能基线阶段评估切换为预编译 Metal shader。
 
 ## 4. 稳定边界
 
@@ -226,7 +229,7 @@ Loading/Parsed/LaidOut --Stop/NewNavigation--> Cancelled
 | B 数据与 Space | SQLite migration、Space/Page CRUD、恢复 | 强制退出恢复测试通过 |
 | C 文档模型 | 网络/file loader、HTML/CSS 适配、内部 DOM | 解析 corpus 无 panic |
 | D 样式与布局 | 级联、块/行内、盒模型、文本换行 | 布局树金样通过 |
-| E 绘制与交互 | DisplayList、wgpu、图片、滚动、链接 | 30 个页面可读且可导航 |
+| E 绘制与交互 | DisplayList、GPUI、图片、滚动、链接 | 30 个页面可读且可导航 |
 | F 稳定化 | 错误页、取消、资源上限、fuzz、性能基线 | PRD 全部验收项通过 |
 
 阶段按依赖顺序推进。UI 与引擎可以在稳定接口后并行，但不得绕过上游退出条件全面展开。

@@ -58,7 +58,7 @@ flowchart TB
 - Browser 进程：UI、Space、权限、扩展宿主、网络策略、同步  
 - Renderer：按站（eTLD+1）隔离；**不等于每标签一进程**  
 - 同时前台页默认限制为 1（可配置）  
-- GPU：初期同进程 wgpu；稳定后再拆  
+- GPU：初期通过 GPUI Metal 后端同进程呈现；稳定后再拆
 
 ---
 
@@ -72,7 +72,7 @@ flowchart LR
   Dom --> Style
   Style --> Layout[arch_layout]
   Layout --> Paint[arch_paint]
-  Paint --> Gfx[arch_gfx_wgpu]
+  Paint --> Gfx[GPUI DisplayList adapter]
   Js[arch_js] --> Dom
 ```
 
@@ -80,7 +80,7 @@ flowchart LR
 
 | Crate | 职责 | 实现策略 |
 |-------|------|----------|
-| arch-browser | iced 壳：Space、地址栏、权限 UX | 自研 + iced/winit |
+| arch-browser | GPUI 壳：Space、地址栏、权限 UX、DisplayList 展示 | 自研 + GPUI/gpui-component |
 | arch-session | Foreground/Background/Hibernated | 自研状态机 + 版本化快照 |
 | arch-net | HTTP(S)、重定向、Cookie | hyper + rustls + tokio |
 | arch-html | 字节 → DOM | 档 A：html5ever；档 B：自写 |
@@ -89,7 +89,7 @@ flowchart LR
 | arch-style | 级联、继承、指定值 | **自研（核心）** |
 | arch-layout | 块/行内/简单 flex、滚动 | **自研（核心 IP）** |
 | arch-paint | DisplayList、图层 | **自研** |
-| arch-gfx | GPU 呈现、文字 | wgpu + HarfBuzz + 系统字体 |
+| arch-gfx | 后续独立 GPU 呈现与文字层 | V3 不创建；后续从 GPUI 适配层拆分 |
 | arch-js | 最小 DOM 绑定 | QuickJS 或 Boa（不自研 JIT） |
 | arch-policy | 扩展与会话权限 | 自研（见扩展详设） |
 | arch-sync | E2E 同步 | SQLite + AEAD/age |
@@ -142,10 +142,10 @@ Background --(用户切回)--> Foreground
 
 | 项 | 选型 | 备注 |
 |----|------|------|
-| 框架 | iced + winit | MIT；排除未付费 Slint-GPL |
+| 框架 | GPUI + gpui-component | Apache-2.0；排除未付费 Slint-GPL |
 | 信息架构 | 左 Space，内垂直页列表 | 非 Chrome 顶栏标签海 |
-| 内容区 | 引擎 wgpu 表面嵌入 | Phase 0 可用自绘金样占位，**不**接系统 WebView |
-| 内部页 | 设置/权限/扩展管理 | 可用 iced 或引擎约简页 |
+| 内容区 | DisplayList 适配为 GPUI 元素 | Phase 0 可用自绘金样占位，**不**接系统 WebView |
+| 内部页 | 设置/权限/扩展管理 | 使用 GPUI/gpui-component 或引擎约简页 |
 
 ---
 
@@ -214,9 +214,9 @@ quick-browser/
 
 | Phase | 周期（约） | 交付 |
 |-------|------------|------|
-| 0 | 2–4 周 | iced Space 壳 + SQLite；金样文本/简易盒占位 |
+| 0 | 2–4 周 | GPUI Space 壳 + SQLite；金样文本/简易盒占位 |
 | 1 | 1–2 月 | net + HTML/CSS→DOM |
-| 2 | 2–4 月 | 布局 + DisplayList + wgpu；链接/滚动；截图回归 |
+| 2 | 2–4 月 | 布局 + DisplayList + GPUI 展示；链接/滚动；截图回归 |
 | 3 | 1–2 月 | 三级资源与 Space 打通；内存基准 |
 | 4 | 3–6 月 | QuickJS/Boa 最小 DOM；阅读模式；一次性权限；统计/番茄钟 |
 | 4b | 并行 | 扩展 Tier0/1；规则侧载 |
@@ -241,7 +241,7 @@ Phase 0–2 的首个可实施切片以 [03-Archetype-V3-详设.md](./03-Archety
 
 ```text
 自研：style / layout / paint / session / policy / sync 策略
-借用：iced, SQLite, hyper, rustls, wgpu, HarfBuzz, QuickJS|Boa
+借用：GPUI, gpui-component, SQLite, hyper, rustls, HarfBuzz, QuickJS|Boa
 可选：Chromium Pod
 禁止主路径：Servo/Gecko/WebKit/系统 WebView 作为引擎
 禁止默认：Slint-GPL、捆绑未审模型权重
