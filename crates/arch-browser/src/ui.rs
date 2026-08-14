@@ -18,6 +18,7 @@ use gpui_component::{
     button::{Button, ButtonVariants as _},
     h_flex,
     input::{Input, InputEvent, InputState},
+    menu::{DropdownMenu as _, PopupMenuItem},
     v_flex,
 };
 use url::Url;
@@ -188,6 +189,7 @@ struct QuickBrowser {
     error: Option<ErrorView>,
     address_input: Entity<InputState>,
     space_input: Entity<InputState>,
+    renaming_space: bool,
     subscriptions: Vec<Subscription>,
 }
 
@@ -257,6 +259,7 @@ impl QuickBrowser {
             error: None,
             address_input,
             space_input,
+            renaming_space: false,
             subscriptions,
         }
     }
@@ -287,12 +290,9 @@ impl QuickBrowser {
         match self.core.create_space(&name) {
             Ok(space) => {
                 self.selected_space = Some(space.id.clone());
-                self.selected_page = None;
-                self.pages.clear();
                 self.spaces.push(space);
-                self.rendered = None;
+                self.renaming_space = false;
                 self.set_space_name(name, window, cx);
-                self.set_address("", window, cx);
                 self.persist_selection();
             }
             Err(error) => self.error = Some(ErrorView::application(self.language, &error)),
@@ -333,6 +333,7 @@ impl QuickBrowser {
                 if let Some(space) = self.spaces.iter_mut().find(|space| space.id == id) {
                     space.name.clone_from(&name);
                 }
+                self.renaming_space = false;
                 self.set_space_name(name, window, cx);
             }
             Ok(false) => {
@@ -343,6 +344,23 @@ impl QuickBrowser {
             }
             Err(error) => self.error = Some(ErrorView::application(self.language, &error)),
         }
+        cx.notify();
+    }
+
+    fn begin_rename_space(&mut self, cx: &mut Context<Self>) {
+        self.renaming_space = true;
+        cx.notify();
+    }
+
+    fn cancel_rename_space(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.renaming_space = false;
+        let name = self
+            .selected_space
+            .as_deref()
+            .and_then(|id| self.spaces.iter().find(|space| space.id == id))
+            .map(|space| space.name.clone())
+            .unwrap_or_default();
+        self.set_space_name(name, window, cx);
         cx.notify();
     }
 
@@ -400,22 +418,27 @@ impl QuickBrowser {
     }
 
     fn close_page(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(page) = self.pages.iter().find(|page| page.id == id).cloned() else {
+        let Some(closing_index) = self.pages.iter().position(|page| page.id == id) else {
             return;
         };
+        let page = self.pages[closing_index].clone();
+        let closing_selected = self.selected_page.as_deref() == Some(id);
+        let adjacent_page = adjacent_page_id_after_close(&self.pages, closing_index);
         if let Err(error) = self.core.close_page(&page) {
             self.error = Some(ErrorView::application(self.language, &error));
             cx.notify();
             return;
         }
         self.pages.retain(|item| item.id != id);
-        self.selected_page = self.pages.first().map(|item| item.id.clone());
-        let address = self
-            .selected_page_record()
-            .map(|page| page.url.clone())
-            .unwrap_or_default();
-        self.rendered = None;
-        self.set_address(address, window, cx);
+        if closing_selected {
+            self.selected_page = adjacent_page;
+            let address = self
+                .selected_page_record()
+                .map(|page| page.url.clone())
+                .unwrap_or_default();
+            self.rendered = None;
+            self.set_address(address, window, cx);
+        }
         self.persist_selection();
         cx.notify();
     }
@@ -514,150 +537,191 @@ impl QuickBrowser {
         }
     }
 
-    fn space_rows(&self, cx: &mut Context<Self>) -> Vec<AnyElement> {
-        self.spaces
-            .iter()
-            .map(|space| {
-                let id = space.id.clone();
-                let active = self.selected_space.as_deref() == Some(space.id.as_str());
-                Button::new(SharedString::from(format!("space-{}", space.id)))
-                    .ghost()
-                    .label(space.name.clone())
-                    .w_full()
-                    .when(active, gpui_component::button::ButtonVariants::primary)
-                    .on_click(cx.listener(move |this, _, window, cx| {
-                        this.select_space(&id, window, cx);
-                    }))
-                    .into_any_element()
+    fn space_switcher(&self, cx: &mut Context<Self>) -> AnyElement {
+        if self.renaming_space {
+            return h_flex()
+                .w(px(230.0))
+                .gap_1()
+                .child(div().flex_1().child(Input::new(&self.space_input).small()))
+                .child(
+                    Button::new("save-space-name")
+                        .ghost()
+                        .icon(AppIcon::Rename)
+                        .xsmall()
+                        .tooltip(self.language.save())
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.rename_selected_space(window, cx);
+                        })),
+                )
+                .child(
+                    Button::new("cancel-space-name")
+                        .ghost()
+                        .icon(AppIcon::Close)
+                        .xsmall()
+                        .tooltip(self.language.cancel())
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.cancel_rename_space(window, cx);
+                        })),
+                )
+                .into_any_element();
+        }
+
+        let selected_name = self
+            .selected_space
+            .as_deref()
+            .and_then(|id| self.spaces.iter().find(|space| space.id == id))
+            .map_or_else(
+                || self.language.default_space_name().to_owned(),
+                |space| space.name.clone(),
+            );
+        let spaces = self.spaces.clone();
+        let selected_space = self.selected_space.clone();
+        let browser = cx.entity();
+        let language = self.language;
+        let can_delete = self.spaces.len() > 1;
+
+        Button::new("space-switcher")
+            .ghost()
+            .small()
+            .label(selected_name)
+            .dropdown_caret(true)
+            .tooltip(language.switch_space())
+            .dropdown_menu(move |mut menu, _, _| {
+                for space in &spaces {
+                    let id = space.id.clone();
+                    let browser = browser.clone();
+                    menu = menu.item(
+                        PopupMenuItem::new(space.name.clone())
+                            .checked(selected_space.as_deref() == Some(space.id.as_str()))
+                            .on_click(move |_, window, cx| {
+                                browser.update(cx, |this, cx| {
+                                    this.select_space(&id, window, cx);
+                                });
+                            }),
+                    );
+                }
+                let add_browser = browser.clone();
+                let rename_browser = browser.clone();
+                let delete_browser = browser.clone();
+                menu.separator()
+                    .item(
+                        PopupMenuItem::new(language.new_space())
+                            .icon(Icon::new(AppIcon::Add))
+                            .on_click(move |_, window, cx| {
+                                add_browser.update(cx, |this, cx| {
+                                    this.add_space(window, cx);
+                                });
+                            }),
+                    )
+                    .item(
+                        PopupMenuItem::new(language.rename_space())
+                            .icon(Icon::new(AppIcon::Rename))
+                            .disabled(selected_space.is_none())
+                            .on_click(move |_, _, cx| {
+                                rename_browser.update(cx, |this, cx| {
+                                    this.begin_rename_space(cx);
+                                });
+                            }),
+                    )
+                    .item(
+                        PopupMenuItem::new(language.delete_space())
+                            .icon(Icon::new(AppIcon::Delete))
+                            .disabled(!can_delete)
+                            .on_click(move |_, window, cx| {
+                                delete_browser.update(cx, |this, cx| {
+                                    this.delete_selected_space(window, cx);
+                                });
+                            }),
+                    )
             })
-            .collect()
+            .into_any_element()
     }
 
-    fn page_rows(&self, cx: &mut Context<Self>) -> Vec<AnyElement> {
-        self.pages
-            .iter()
-            .map(|page| {
-                let select_id = page.id.clone();
-                let close_id = page.id.clone();
-                let active = self.selected_page.as_deref() == Some(page.id.as_str());
-                let label = if page.title.is_empty() {
-                    page.url.clone()
+    fn tab_strip(&self, cx: &mut Context<Self>) -> AnyElement {
+        let tabs = self.pages.iter().map(|page| {
+            let select_id = page.id.clone();
+            let close_id = page.id.clone();
+            let active = self.selected_page.as_deref() == Some(page.id.as_str());
+            let label = if page.title.is_empty() {
+                page.url.clone()
+            } else {
+                page.title.clone()
+            };
+            h_flex()
+                .id(SharedString::from(format!("tab-{}", page.id)))
+                .h(px(36.0))
+                .min_w(px(72.0))
+                .max_w(px(220.0))
+                .flex_1()
+                .px_2()
+                .gap_1()
+                .cursor_pointer()
+                .overflow_hidden()
+                .border_1()
+                .border_color(if active {
+                    cx.theme().border
                 } else {
-                    page.title.clone()
-                };
-                h_flex()
-                    .w_full()
-                    .gap_1()
-                    .child(
-                        Button::new(SharedString::from(format!("page-{}", page.id)))
-                            .ghost()
-                            .label(label)
-                            .w_full()
-                            .when(active, gpui_component::button::ButtonVariants::primary)
-                            .on_click(cx.listener(move |this, _, window, cx| {
-                                this.select_page(&select_id, window, cx);
-                            })),
-                    )
-                    .child(
-                        Button::new(SharedString::from(format!("close-page-{}", page.id)))
-                            .ghost()
-                            .icon(AppIcon::Close)
-                            .xsmall()
-                            .on_click(cx.listener(move |this, _, window, cx| {
-                                this.close_page(&close_id, window, cx);
-                            })),
-                    )
-                    .into_any_element()
-            })
-            .collect()
-    }
+                    cx.theme().transparent
+                })
+                .bg(if active {
+                    cx.theme().background
+                } else {
+                    cx.theme().tab_bar
+                })
+                .rounded(cx.theme().radius)
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .overflow_hidden()
+                        .text_ellipsis()
+                        .whitespace_nowrap()
+                        .text_sm()
+                        .child(label),
+                )
+                .child(
+                    Button::new(SharedString::from(format!("close-tab-{}", page.id)))
+                        .ghost()
+                        .icon(AppIcon::Close)
+                        .xsmall()
+                        .tooltip(self.language.close_tab())
+                        .on_click(cx.listener(move |this, _, window, cx| {
+                            cx.stop_propagation();
+                            this.close_page(&close_id, window, cx);
+                        })),
+                )
+                .on_click(cx.listener(move |this, _, window, cx| {
+                    this.select_page(&select_id, window, cx);
+                }))
+        });
 
-    fn sidebar(&self, cx: &mut Context<Self>) -> AnyElement {
-        let space_rows = self.space_rows(cx);
-        let page_rows = self.page_rows(cx);
-
-        v_flex()
-            .w(px(300.0))
-            .h_full()
-            .flex_shrink_0()
-            .border_r_1()
+        h_flex()
+            .h(px(42.0))
+            .w_full()
+            .px_2()
+            .pt_1()
+            .gap_1()
+            .border_b_1()
             .border_color(cx.theme().border)
-            .bg(cx.theme().sidebar)
+            .bg(cx.theme().tab_bar)
             .child(
                 h_flex()
-                    .px_3()
-                    .pt_3()
-                    .pb_2()
-                    .justify_between()
-                    .child(
-                        div()
-                            .text_sm()
-                            .font_semibold()
-                            .child(self.language.spaces()),
-                    )
-                    .child(
-                        Button::new("add-space")
-                            .ghost()
-                            .icon(AppIcon::Add)
-                            .small()
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.add_space(window, cx);
-                            })),
-                    ),
-            )
-            .child(v_flex().px_2().gap_1().children(space_rows))
-            .child(
-                h_flex()
-                    .px_2()
-                    .py_2()
-                    .gap_1()
-                    .child(div().flex_1().child(Input::new(&self.space_input).small()))
-                    .child(
-                        Button::new("rename-space")
-                            .ghost()
-                            .icon(AppIcon::Rename)
-                            .small()
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.rename_selected_space(window, cx);
-                            })),
-                    )
-                    .child(
-                        Button::new("delete-space")
-                            .ghost()
-                            .icon(AppIcon::Delete)
-                            .small()
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.delete_selected_space(window, cx);
-                            })),
-                    ),
-            )
-            .child(
-                h_flex()
-                    .px_3()
-                    .pt_3()
-                    .pb_2()
-                    .border_t_1()
-                    .border_color(cx.theme().border)
-                    .justify_between()
-                    .child(div().text_sm().font_semibold().child(self.language.pages()))
-                    .child(
-                        Button::new("add-page")
-                            .ghost()
-                            .icon(AppIcon::Add)
-                            .small()
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.add_page(window, cx);
-                            })),
-                    ),
-            )
-            .child(
-                v_flex()
-                    .id("page-list")
+                    .id("tab-list")
                     .flex_1()
-                    .overflow_y_scroll()
-                    .px_2()
+                    .min_w_0()
+                    .overflow_x_scroll()
                     .gap_1()
-                    .children(page_rows),
+                    .children(tabs),
+            )
+            .child(
+                Button::new("new-tab")
+                    .ghost()
+                    .icon(AppIcon::Add)
+                    .small()
+                    .tooltip(self.language.new_tab())
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.add_page(window, cx);
+                    })),
             )
             .into_any_element()
     }
@@ -678,6 +742,7 @@ impl QuickBrowser {
                 Button::new("back")
                     .ghost()
                     .icon(AppIcon::Back)
+                    .tooltip(self.language.go_back())
                     .disabled(!can_back)
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.navigate_history(HistoryDirection::Back, window, cx);
@@ -687,6 +752,7 @@ impl QuickBrowser {
                 Button::new("forward")
                     .ghost()
                     .icon(AppIcon::Forward)
+                    .tooltip(self.language.go_forward())
                     .disabled(!can_forward)
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.navigate_history(HistoryDirection::Forward, window, cx);
@@ -696,6 +762,7 @@ impl QuickBrowser {
                 Button::new("reload")
                     .ghost()
                     .icon(AppIcon::Refresh)
+                    .tooltip(self.language.reload())
                     .disabled(current.is_none())
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.navigate_history(HistoryDirection::Reload, window, cx);
@@ -712,6 +779,7 @@ impl QuickBrowser {
                 Button::new("navigate")
                     .primary()
                     .icon(AppIcon::Forward)
+                    .tooltip(self.language.navigate())
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.navigate_current(window, cx);
                     })),
@@ -902,29 +970,28 @@ impl Render for QuickBrowser {
                     h_flex()
                         .w_full()
                         .justify_between()
-                        .child(div().font_semibold().child("Archetype"))
                         .child(
-                            div()
-                                .text_xs()
-                                .text_color(cx.theme().muted_foreground)
-                                .child(self.language.developer_preview()),
-                        ),
+                            h_flex()
+                                .gap_2()
+                                .child(div().font_semibold().child("Archetype"))
+                                .child(
+                                    div()
+                                        .text_xs()
+                                        .text_color(cx.theme().muted_foreground)
+                                        .child(self.language.developer_preview()),
+                                ),
+                        )
+                        .child(self.space_switcher(cx)),
                 ),
             )
+            .child(self.tab_strip(cx))
+            .child(self.toolbar(cx))
             .child(
-                h_flex()
+                div()
                     .flex_1()
                     .w_full()
                     .overflow_hidden()
-                    .child(self.sidebar(cx))
-                    .child(
-                        v_flex()
-                            .flex_1()
-                            .h_full()
-                            .overflow_hidden()
-                            .child(self.toolbar(cx))
-                            .child(self.content(cx)),
-                    ),
+                    .child(self.content(cx)),
             )
     }
 }
@@ -979,6 +1046,17 @@ fn looks_like_host(address: &str) -> bool {
         && !address.starts_with('.')
         && !address.starts_with('/')
         && (address == "localhost" || address.starts_with("localhost:") || address.contains('.'))
+}
+
+fn adjacent_page_id_after_close(pages: &[Page], closing_index: usize) -> Option<String> {
+    pages
+        .get(closing_index + 1)
+        .or_else(|| {
+            closing_index
+                .checked_sub(1)
+                .and_then(|index| pages.get(index))
+        })
+        .map(|page| page.id.clone())
 }
 
 fn gpui_color(color: PaintColor) -> gpui::Hsla {
@@ -1052,5 +1130,28 @@ mod tests {
             parse_address("  ", Language::Chinese).unwrap_err(),
             "地址不能为空"
         );
+    }
+
+    #[test]
+    fn closing_selected_tab_prefers_right_then_left_neighbor() {
+        let pages = [test_page("a"), test_page("b"), test_page("c")];
+        assert_eq!(
+            adjacent_page_id_after_close(&pages, 1).as_deref(),
+            Some("c")
+        );
+        assert_eq!(
+            adjacent_page_id_after_close(&pages, 2).as_deref(),
+            Some("b")
+        );
+        assert_eq!(adjacent_page_id_after_close(&pages[..1], 0), None);
+    }
+
+    fn test_page(id: &str) -> Page {
+        Page {
+            id: id.to_owned(),
+            url: String::new(),
+            title: String::new(),
+            position: 0,
+        }
     }
 }

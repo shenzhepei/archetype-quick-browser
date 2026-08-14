@@ -83,12 +83,52 @@ impl Language {
         self.select("所选空间已不存在", "Selected Space no longer exists")
     }
 
-    pub(crate) const fn spaces(self) -> &'static str {
-        self.select("空间", "SPACES")
+    pub(crate) const fn new_tab(self) -> &'static str {
+        self.select("新建标签页", "New tab")
     }
 
-    pub(crate) const fn pages(self) -> &'static str {
-        self.select("页面", "PAGES")
+    pub(crate) const fn close_tab(self) -> &'static str {
+        self.select("关闭标签页", "Close tab")
+    }
+
+    pub(crate) const fn switch_space(self) -> &'static str {
+        self.select("切换空间", "Switch Space")
+    }
+
+    pub(crate) const fn new_space(self) -> &'static str {
+        self.select("新建空间", "New Space")
+    }
+
+    pub(crate) const fn rename_space(self) -> &'static str {
+        self.select("重命名空间", "Rename Space")
+    }
+
+    pub(crate) const fn delete_space(self) -> &'static str {
+        self.select("删除空间", "Delete Space")
+    }
+
+    pub(crate) const fn save(self) -> &'static str {
+        self.select("保存", "Save")
+    }
+
+    pub(crate) const fn cancel(self) -> &'static str {
+        self.select("取消", "Cancel")
+    }
+
+    pub(crate) const fn go_back(self) -> &'static str {
+        self.select("后退", "Back")
+    }
+
+    pub(crate) const fn go_forward(self) -> &'static str {
+        self.select("前进", "Forward")
+    }
+
+    pub(crate) const fn reload(self) -> &'static str {
+        self.select("重新加载", "Reload")
+    }
+
+    pub(crate) const fn navigate(self) -> &'static str {
+        self.select("前往", "Go")
     }
 
     pub(crate) const fn open_page_to_begin(self) -> &'static str {
