@@ -1,0 +1,28 @@
+[package]
+name = "arch-browser"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+arch-css = { path = "../arch-css" }
+arch-dom = { path = "../arch-dom" }
+arch-html = { path = "../arch-html" }
+arch-layout = { path = "../arch-layout" }
+arch-net = { path = "../arch-net" }
+arch-paint = { path = "../arch-paint" }
+arch-session = { path = "../arch-session" }
+arch-store = { path = "../arch-store" }
+arch-style = { path = "../arch-style" }
+directories.workspace = true
+gpui.workspace = true
+gpui-component.workspace = true
+gpui-component-assets.workspace = true
+image.workspace = true
+url.workspace = true
+uuid.workspace = true
+
+[lints]
+workspace = true

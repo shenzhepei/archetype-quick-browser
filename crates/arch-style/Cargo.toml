@@ -1,0 +1,17 @@
+[package]
+name = "arch-style"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+arch-css = { path = "../arch-css" }
+arch-dom = { path = "../arch-dom" }
+serde.workspace = true
+
+[dev-dependencies]
+arch-html = { path = "../arch-html" }
+
+[lints]
+workspace = true

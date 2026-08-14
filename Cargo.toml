@@ -1,0 +1,43 @@
+[workspace]
+resolver = "2"
+members = [
+  "crates/arch-browser",
+  "crates/arch-css",
+  "crates/arch-dom",
+  "crates/arch-html",
+  "crates/arch-layout",
+  "crates/arch-net",
+  "crates/arch-paint",
+  "crates/arch-session",
+  "crates/arch-store",
+  "crates/arch-style",
+]
+
+[workspace.package]
+version = "0.3.0"
+edition = "2024"
+license = "Apache-2.0"
+rust-version = "1.85"
+
+[workspace.dependencies]
+anyhow = "1.0"
+html5ever = "0.35"
+gpui = { version = "0.2.2", features = ["runtime_shaders"] }
+gpui-component = "0.5.1"
+gpui-component-assets = "0.5.1"
+directories = "6.0"
+image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
+markup5ever_rcdom = "0.35"
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls"] }
+rusqlite = { version = "0.32", features = ["bundled"] }
+serde = { version = "1.0", features = ["derive"] }
+thiserror = "2.0"
+url = "2.5"
+uuid = { version = "1.11", features = ["serde", "v7"] }
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+all = "warn"
+pedantic = "warn"
