@@ -63,12 +63,40 @@ pub struct Page {
     pub position: i64,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum BookmarkKind {
+    Bookmark,
+    Folder,
+}
+
+impl BookmarkKind {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::Bookmark => "bookmark",
+            Self::Folder => "folder",
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Bookmark {
+    pub id: String,
+    pub space_id: String,
+    pub parent_id: Option<String>,
+    pub kind: BookmarkKind,
+    pub title: String,
+    pub url: Option<String>,
+    pub position: i64,
+}
+
 #[derive(Debug, Error)]
 pub enum StoreError {
     #[error("database error: {0}")]
     Database(#[from] rusqlite::Error),
     #[error("database recovery I/O error: {0}")]
     RecoveryIo(#[from] std::io::Error),
+    #[error("invalid bookmark: {0}")]
+    InvalidBookmark(&'static str),
 }
 
 pub struct Store {
@@ -311,6 +339,162 @@ impl Store {
             .collect::<Result<_, _>>()?)
     }
 
+    /// Inserts a URL bookmark into a Space folder or its root.
+    ///
+    /// # Errors
+    /// Returns [`StoreError`] when the parent is invalid or the transaction fails.
+    pub fn create_bookmark(
+        &mut self,
+        space_id: &str,
+        parent_id: Option<&str>,
+        title: &str,
+        url: &str,
+    ) -> Result<Bookmark, StoreError> {
+        if url.is_empty() {
+            return Err(StoreError::InvalidBookmark("URL cannot be empty"));
+        }
+        self.insert_bookmark(
+            space_id,
+            parent_id,
+            BookmarkKind::Bookmark,
+            title,
+            Some(url),
+        )
+    }
+
+    /// Inserts a bookmark folder into a Space folder or its root.
+    ///
+    /// # Errors
+    /// Returns [`StoreError`] when the parent is invalid or the transaction fails.
+    pub fn create_bookmark_folder(
+        &mut self,
+        space_id: &str,
+        parent_id: Option<&str>,
+        title: &str,
+    ) -> Result<Bookmark, StoreError> {
+        self.insert_bookmark(space_id, parent_id, BookmarkKind::Folder, title, None)
+    }
+
+    fn insert_bookmark(
+        &mut self,
+        space_id: &str,
+        parent_id: Option<&str>,
+        kind: BookmarkKind,
+        title: &str,
+        url: Option<&str>,
+    ) -> Result<Bookmark, StoreError> {
+        if title.trim().is_empty() {
+            return Err(StoreError::InvalidBookmark("title cannot be empty"));
+        }
+        let transaction = self.connection.transaction()?;
+        if let Some(parent_id) = parent_id {
+            let parent: Option<(String, String)> = transaction
+                .query_row(
+                    "SELECT space_id, kind FROM bookmarks WHERE id = ?",
+                    [parent_id],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .optional()?;
+            match parent {
+                Some((parent_space, parent_kind))
+                    if parent_space == space_id && parent_kind == "folder" => {}
+                Some(_) => {
+                    return Err(StoreError::InvalidBookmark(
+                        "parent must be a folder in the same Space",
+                    ));
+                }
+                None => return Err(StoreError::InvalidBookmark("parent folder does not exist")),
+            }
+        }
+        let position: i64 = transaction.query_row(
+            "SELECT COALESCE(MAX(position), -1) + 1 FROM bookmarks WHERE space_id = ?1 AND parent_id IS ?2",
+            params![space_id, parent_id],
+            |row| row.get(0),
+        )?;
+        let now = now_ms();
+        let bookmark = Bookmark {
+            id: Uuid::now_v7().to_string(),
+            space_id: space_id.to_owned(),
+            parent_id: parent_id.map(str::to_owned),
+            kind,
+            title: title.trim().to_owned(),
+            url: url.map(str::to_owned),
+            position,
+        };
+        transaction.execute(
+            "INSERT INTO bookmarks(id, space_id, parent_id, kind, title, url, position, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            params![
+                bookmark.id,
+                bookmark.space_id,
+                bookmark.parent_id,
+                bookmark.kind.as_str(),
+                bookmark.title,
+                bookmark.url,
+                bookmark.position,
+                now,
+                now
+            ],
+        )?;
+        transaction.commit()?;
+        Ok(bookmark)
+    }
+
+    /// Lists the direct children of a Space bookmark folder or root.
+    ///
+    /// # Errors
+    /// Returns [`StoreError`] when the database query fails or contains an invalid kind.
+    pub fn bookmarks(
+        &self,
+        space_id: &str,
+        parent_id: Option<&str>,
+    ) -> Result<Vec<Bookmark>, StoreError> {
+        let mut statement = self.connection.prepare(
+            "SELECT id, space_id, parent_id, kind, title, url, position FROM bookmarks WHERE space_id = ?1 AND parent_id IS ?2 ORDER BY position, id",
+        )?;
+        Ok(statement
+            .query_map(params![space_id, parent_id], bookmark_from_row)?
+            .collect::<Result<_, _>>()?)
+    }
+
+    /// Renames a bookmark or folder.
+    ///
+    /// # Errors
+    /// Returns [`StoreError`] when the title is empty or the database update fails.
+    pub fn rename_bookmark(&self, id: &str, title: &str) -> Result<bool, StoreError> {
+        if title.trim().is_empty() {
+            return Err(StoreError::InvalidBookmark("title cannot be empty"));
+        }
+        Ok(self.connection.execute(
+            "UPDATE bookmarks SET title = ?, updated_at = ? WHERE id = ?",
+            params![title.trim(), now_ms(), id],
+        )? == 1)
+    }
+
+    /// Deletes a bookmark subtree and compacts its former siblings.
+    ///
+    /// # Errors
+    /// Returns [`StoreError`] when the transaction fails.
+    pub fn delete_bookmark(&mut self, id: &str) -> Result<bool, StoreError> {
+        let transaction = self.connection.transaction()?;
+        let location: Option<(String, Option<String>)> = transaction
+            .query_row(
+                "SELECT space_id, parent_id FROM bookmarks WHERE id = ?",
+                [id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?;
+        let Some((space_id, parent_id)) = location else {
+            return Ok(false);
+        };
+        transaction.execute("DELETE FROM bookmarks WHERE id = ?", [id])?;
+        transaction.execute(
+            "WITH ranked AS (SELECT id, ROW_NUMBER() OVER (ORDER BY position, id) - 1 AS next FROM bookmarks WHERE space_id = ?1 AND parent_id IS ?2) UPDATE bookmarks SET position = (SELECT next FROM ranked WHERE ranked.id = bookmarks.id) WHERE space_id = ?1 AND parent_id IS ?2",
+            params![space_id, parent_id],
+        )?;
+        transaction.commit()?;
+        Ok(true)
+    }
+
     /// Inserts or replaces a named application-state value.
     ///
     /// # Errors
@@ -332,6 +516,29 @@ impl Store {
             })
             .optional()?)
     }
+}
+
+fn bookmark_from_row(row: &rusqlite::Row<'_>) -> Result<Bookmark, rusqlite::Error> {
+    let kind = match row.get::<_, String>(3)?.as_str() {
+        "bookmark" => BookmarkKind::Bookmark,
+        "folder" => BookmarkKind::Folder,
+        value => {
+            return Err(rusqlite::Error::FromSqlConversionFailure(
+                3,
+                rusqlite::types::Type::Text,
+                format!("unknown bookmark kind: {value}").into(),
+            ));
+        }
+    };
+    Ok(Bookmark {
+        id: row.get(0)?,
+        space_id: row.get(1)?,
+        parent_id: row.get(2)?,
+        kind,
+        title: row.get(4)?,
+        url: row.get(5)?,
+        position: row.get(6)?,
+    })
 }
 
 fn is_corruption(error: &StoreError) -> bool {
@@ -380,9 +587,13 @@ mod tests {
         let mut store = Store::in_memory().unwrap();
         let space = store.create_space("Research").unwrap();
         store.create_page("file:///fixture.html").unwrap();
+        store
+            .create_bookmark(&space.id, None, "Fixture", "file:///fixture.html")
+            .unwrap();
         assert_eq!(store.pages().unwrap().len(), 1);
         store.delete_space(&space.id).unwrap();
         assert_eq!(store.pages().unwrap().len(), 1);
+        assert!(store.bookmarks(&space.id, None).unwrap().is_empty());
     }
 
     #[test]
@@ -477,5 +688,39 @@ mod tests {
 
         drop(store);
         fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn stores_bookmark_folders_and_compacts_deleted_siblings() {
+        let mut store = Store::in_memory().unwrap();
+        let space = store.create_space("Work").unwrap();
+        let other_space = store.create_space("Personal").unwrap();
+        let folder = store
+            .create_bookmark_folder(&space.id, None, "References")
+            .unwrap();
+        let first = store
+            .create_bookmark(&space.id, Some(&folder.id), "One", "https://one.example")
+            .unwrap();
+        store
+            .create_bookmark(&space.id, Some(&folder.id), "Two", "https://two.example")
+            .unwrap();
+        assert!(
+            store
+                .create_bookmark(
+                    &other_space.id,
+                    Some(&folder.id),
+                    "Wrong Space",
+                    "https://invalid.example",
+                )
+                .is_err()
+        );
+        assert!(store.rename_bookmark(&folder.id, "Docs").unwrap());
+        assert_eq!(store.bookmarks(&space.id, None).unwrap()[0].title, "Docs");
+
+        assert!(store.delete_bookmark(&first.id).unwrap());
+        let children = store.bookmarks(&space.id, Some(&folder.id)).unwrap();
+        assert_eq!(children.len(), 1);
+        assert_eq!(children[0].title, "Two");
+        assert_eq!(children[0].position, 0);
     }
 }

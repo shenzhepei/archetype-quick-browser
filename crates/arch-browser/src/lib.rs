@@ -5,7 +5,7 @@ use arch_dom::NodeKind;
 use arch_net::Loader;
 use arch_paint::DisplayList;
 use arch_session::{BrowserCommand, BrowserEvent, PageId, Session};
-use arch_store::{Page, Space, Store};
+use arch_store::{Bookmark, Page, Space, Store};
 use url::Url;
 use uuid::Uuid;
 
@@ -93,6 +93,38 @@ impl BrowserCore {
     /// Returns an error when the database query fails.
     pub fn spaces(&self) -> Result<Vec<Space>> {
         Ok(self.store.spaces()?)
+    }
+
+    /// Creates a URL bookmark in a Space folder or root.
+    ///
+    /// # Errors
+    /// Returns an error when the bookmark data or database transaction is invalid.
+    pub fn create_bookmark(
+        &mut self,
+        space_id: &str,
+        parent_id: Option<&str>,
+        title: &str,
+        url: &Url,
+    ) -> Result<Bookmark> {
+        Ok(self
+            .store
+            .create_bookmark(space_id, parent_id, title, url.as_str())?)
+    }
+
+    /// Lists direct bookmark children in a Space folder or root.
+    ///
+    /// # Errors
+    /// Returns an error when the database query fails.
+    pub fn bookmarks(&self, space_id: &str, parent_id: Option<&str>) -> Result<Vec<Bookmark>> {
+        Ok(self.store.bookmarks(space_id, parent_id)?)
+    }
+
+    /// Deletes a bookmark or folder subtree.
+    ///
+    /// # Errors
+    /// Returns an error when the database transaction fails.
+    pub fn delete_bookmark(&mut self, id: &str) -> Result<bool> {
+        Ok(self.store.delete_bookmark(id)?)
     }
 
     /// Creates and persists a global tab, assigning a stable V7 UUID.
