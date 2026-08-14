@@ -12,5 +12,7 @@
 | 01 | [Archetype PRD](./01-Archetype-PRD.md) | [Archetype 总体详设](../detailed-design/01-Archetype-总体详设.md) |
 | 02 | [扩展系统 PRD](./02-Archetype-扩展系统-PRD.md) | [扩展系统详设](../detailed-design/02-Archetype-扩展系统详设.md) |
 | 03 | [Archetype V3 PRD](./03-Archetype-V3-PRD.md) | [Archetype V3 详设](../detailed-design/03-Archetype-V3-详设.md) |
+| 04 | [Rust SDK 与 Runtime PRD](./04-Archetype-Rust-SDK与Runtime-PRD.md) | [Rust SDK 与 Runtime 详设](../detailed-design/04-Archetype-Rust-SDK与Runtime详设.md) |
 
 03 的当前桌面实现技术基线为 GPUI + gpui-component，具体工程约束以同号详设为准。
+04 定义面向 Rust 合作方的公开 SDK、独立 Runtime 和版本化 IPC 长期交付边界。

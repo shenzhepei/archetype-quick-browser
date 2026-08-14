@@ -25,7 +25,7 @@
 ```mermaid
 flowchart TB
   subgraph browserProc [BrowserProcess_Rust]
-    SpaceUI[SpaceSidebar_FocusChrome]
+    SpaceUI[TopTabs_CompactSpace_Bookmarks]
     Session[SpaceSession_Hibernate]
     Policy[Permission_ExtensionPolicy]
     Sync[E2E_Sync_P2P]
@@ -143,7 +143,7 @@ Background --(用户切回)--> Foreground
 | 项 | 选型 | 备注 |
 |----|------|------|
 | 框架 | GPUI + gpui-component | Apache-2.0；排除未付费 Slint-GPL |
-| 信息架构 | 左 Space，内垂直页列表 | 非 Chrome 顶栏标签海 |
+| 信息架构 | 顶部可收缩标签页 + 紧凑 Space 切换 + Space 书签树 | 保留 Chrome/Safari 熟悉交互，Space 只增强书签上下文 |
 | 内容区 | DisplayList 适配为 GPUI 元素 | Phase 0 可用自绘金样占位，**不**接系统 WebView |
 | 内部页 | 设置/权限/扩展管理 | 使用 GPUI/gpui-component 或引擎约简页 |
 

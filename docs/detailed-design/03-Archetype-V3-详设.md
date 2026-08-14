@@ -58,8 +58,8 @@ flowchart LR
 
 | Crate | V3 职责 | 不负责 |
 |-------|---------|--------|
-| `arch-browser` | GPUI 窗口、Space、地址栏、导航命令、错误页、DisplayList 展示 | 网页排版规则 |
-| `arch-session` | 页面列表、导航历史、选中状态 | DOM 快照、JS 冻结 |
+| `arch-browser` | GPUI 窗口、顶部标签页、紧凑 Space 切换、书签入口、地址栏、导航命令、错误页、DisplayList 展示 | 网页排版规则 |
+| `arch-session` | 全局标签页、导航历史、选中状态 | DOM 快照、JS 冻结 |
 | `arch-store` | SQLite schema、事务、迁移 | 页面正文缓存 |
 | `arch-net` | GET、重定向、超时、响应体限制 | Cookie、认证、下载 |
 | `arch-html` | html5ever 适配为内部 DOM | 自研 tokenizer/parser |
@@ -144,9 +144,9 @@ V3 不支持 Flexbox、Grid、float、position、z-index、transform、动画、
 - V3 不持久化 Cookie、认证信息、HTTP 缓存或页面正文。
 - CSS 与图片仅加载同源资源；跨源资源进入 V4 安全模型后再开放。
 
-## 6. Space 与数据模型
+## 6. 标签页、Space、书签与数据模型
 
-V3 schema version 为 `1`：
+V3 schema version 为 `2`。标签页属于窗口级会话；Space 只拥有书签上下文：
 
 ```sql
 CREATE TABLE spaces (
@@ -159,11 +159,22 @@ CREATE TABLE spaces (
 
 CREATE TABLE pages (
   id TEXT PRIMARY KEY,
-  space_id TEXT NOT NULL REFERENCES spaces(id) ON DELETE CASCADE,
   url TEXT NOT NULL,
   title TEXT NOT NULL DEFAULT '',
   position INTEGER NOT NULL,
   last_visited_at INTEGER NOT NULL
+);
+
+CREATE TABLE bookmarks (
+  id TEXT PRIMARY KEY,
+  space_id TEXT NOT NULL REFERENCES spaces(id) ON DELETE CASCADE,
+  parent_id TEXT REFERENCES bookmarks(id) ON DELETE CASCADE,
+  kind TEXT NOT NULL CHECK(kind IN ('bookmark', 'folder')),
+  title TEXT NOT NULL,
+  url TEXT,
+  position INTEGER NOT NULL,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
 );
 
 CREATE TABLE app_state (
@@ -179,9 +190,29 @@ CREATE TABLE schema_migrations (
 
 - ID 使用 UUID v7；时间存 Unix 毫秒 UTC。
 - 写操作必须使用事务；列表排序以整数位置表示并可批量重排。
-- 删除 Space 级联删除页面元数据。
+- `pages` 是全局标签页集合，不带 `space_id`；切换或删除 Space 不改变标签页。
+- `bookmarks` 通过 `space_id` 隔离上下文，`parent_id` 表示文件夹层级；文件夹的 `url` 必须为空。
+- 删除 Space 只级联删除该 Space 的书签，不得删除页面元数据。
+- schema v1 升级到 v2 时保留所有原页面并移除页面的 Space 归属；保持原页面稳定顺序。
 - V3 不保存 DOM、表单、密码、页面正文或截图到用户数据库。
 - 数据库损坏时保留原文件并创建新库，禁止静默覆盖。
+
+### 6.1 桌面信息架构
+
+```text
+Title bar:  Archetype                         [当前 Space ▾]
+Tab strip:  [页面 A ×][页面 B ×][页面 C ×]... [+]
+Toolbar:    [←][→][刷新] [地址栏                         ] [前往]
+Bookmarks:  [书签 1] [文件夹 ▾] ...（可隐藏的紧凑栏）
+Content:    当前页面
+```
+
+- 标签栏固定在内容区顶部、地址栏上方，不在左侧重复展示页面列表。
+- 标签项默认最大宽度 220px，随可用空间等宽收缩，最小宽度 72px；关闭按钮固定不参与文本收缩。
+- 超过最小宽度容量后标签栏横向滚动或提供溢出菜单，当前标签必须自动保持可见。
+- Space 切换入口放在标题栏或工具栏边缘，显示当前 Space 名称并使用下拉菜单切换；不使用常驻 Space 侧栏。
+- Space 创建、重命名、删除收纳在同一下拉菜单或二级管理界面，避免占用高频导航区域。
+- 书签栏默认保持单行紧凑，可隐藏；文件夹点击展开菜单，书签点击在当前标签导航，中键/修饰键可在新标签打开（后者可延后到交互完善阶段）。
 
 ## 7. 导航与失败状态
 
@@ -226,7 +257,7 @@ Loading/Parsed/LaidOut --Stop/NewNavigation--> Cancelled
 | 阶段 | 交付 | 退出条件 |
 |------|------|----------|
 | A 基础工程 | Cargo workspace、CI、日志、许可证清单、空窗口 | 格式化、lint、测试在 CI 通过 |
-| B 数据与 Space | SQLite migration、Space/Page CRUD、恢复 | 强制退出恢复测试通过 |
+| B 数据与会话 | SQLite migration、全局标签页、Space/书签 CRUD、恢复 | 强制退出恢复及 Space/标签页独立性测试通过 |
 | C 文档模型 | 网络/file loader、HTML/CSS 适配、内部 DOM | 解析 corpus 无 panic |
 | D 样式与布局 | 级联、块/行内、盒模型、文本换行 | 布局树金样通过 |
 | E 绘制与交互 | DisplayList、GPUI、图片、滚动、链接 | 30 个页面可读且可导航 |
@@ -245,7 +276,7 @@ Loading/Parsed/LaidOut --Stop/NewNavigation--> Cancelled
 | V4 能力 | V3 预留 |
 |---------|---------|
 | Renderer 多进程与沙箱 | UI 仅通过命令/事件访问引擎；不持有 DOM 指针 |
-| 完整三级资源状态 | `PageId` 稳定；会话元数据与渲染状态分离 |
+| 完整三级资源状态 | `PageId` 稳定；全局标签页元数据与渲染状态分离 |
 | Cookie、表单与权限 | 网络请求上下文不直接依赖 UI 全局状态 |
 | JS 引擎 | DOM 使用稳定 `NodeId`；mutation 接口留在 `arch-dom` 内部 |
 | Flexbox 与更多 CSS | StyledTree/LayoutTree 分离；属性使用版本化枚举 |
@@ -278,3 +309,4 @@ V3 完成必须同时满足：
 - [V3 PRD](../prd/03-Archetype-V3-PRD.md)
 - [总体详细设计](./01-Archetype-总体详设.md)
 - [扩展系统详细设计](./02-Archetype-扩展系统详设.md)
+- [Rust SDK 与 Runtime 详细设计](./04-Archetype-Rust-SDK与Runtime详设.md)
