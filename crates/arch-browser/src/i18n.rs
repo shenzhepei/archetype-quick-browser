@@ -167,6 +167,10 @@ impl Language {
         self.select("空文件夹", "Empty folder")
     }
 
+    pub(crate) const fn save_to_this_folder(self) -> &'static str {
+        self.select("保存到此文件夹", "Save to this folder")
+    }
+
     pub(crate) fn new_folder_name(self, number: usize) -> String {
         match self {
             Self::Chinese => format!("文件夹 {number}"),
@@ -242,5 +246,10 @@ mod tests {
         );
         assert_eq!(Language::Chinese.new_space_name(3), "空间 3");
         assert_eq!(Language::English.new_space_name(3), "Space 3");
+        assert_eq!(Language::Chinese.save_to_this_folder(), "保存到此文件夹");
+        assert_eq!(
+            Language::English.save_to_this_folder(),
+            "Save to this folder"
+        );
     }
 }

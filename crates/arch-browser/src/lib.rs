@@ -590,9 +590,12 @@ mod tests {
         let folder = core
             .create_bookmark_folder(&space.id, None, "References")
             .unwrap();
+        let nested = core
+            .create_bookmark_folder(&space.id, Some(&folder.id), "Rust")
+            .unwrap();
         let url = Url::parse("https://example.com/reference").unwrap();
         let bookmark = core
-            .create_bookmark(&space.id, Some(&folder.id), "Example", &url)
+            .create_bookmark(&space.id, Some(&nested.id), "Example", &url)
             .unwrap();
 
         let root = core.bookmarks(&space.id, None).unwrap();
@@ -601,9 +604,13 @@ mod tests {
         assert_eq!(folder.parent_id, None);
 
         let children = core.bookmarks(&space.id, Some(&folder.id)).unwrap();
+        assert_eq!(children, vec![nested.clone()]);
+        assert_eq!(nested.parent_id.as_deref(), Some(folder.id.as_str()));
+
+        let children = core.bookmarks(&space.id, Some(&nested.id)).unwrap();
         assert_eq!(children, vec![bookmark.clone()]);
         assert_eq!(bookmark.kind, arch_store::BookmarkKind::Bookmark);
-        assert_eq!(bookmark.parent_id.as_deref(), Some(folder.id.as_str()));
+        assert_eq!(bookmark.parent_id.as_deref(), Some(nested.id.as_str()));
         assert_eq!(bookmark.url.as_deref(), Some(url.as_str()));
     }
 
