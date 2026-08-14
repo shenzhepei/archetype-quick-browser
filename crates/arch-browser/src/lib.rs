@@ -51,14 +51,12 @@ impl BrowserCore {
             session: Session::default(),
             loader: Loader::new()?,
         };
-        for space in core.store.spaces()? {
-            for page in core.store.pages(&space.id)? {
-                if let Ok(id) = Uuid::parse_str(&page.id) {
-                    if let Ok(url) = Url::parse(&page.url) {
-                        core.session.restore_page(PageId::from_uuid(id), url);
-                    } else {
-                        core.session.open_page(PageId::from_uuid(id));
-                    }
+        for page in core.store.pages()? {
+            if let Ok(id) = Uuid::parse_str(&page.id) {
+                if let Ok(url) = Url::parse(&page.url) {
+                    core.session.restore_page(PageId::from_uuid(id), url);
+                } else {
+                    core.session.open_page(PageId::from_uuid(id));
                 }
             }
         }
@@ -81,7 +79,7 @@ impl BrowserCore {
         Ok(self.store.rename_space(id, name)?)
     }
 
-    /// Deletes a Space and all of its pages.
+    /// Deletes a Space and its bookmarks without changing global tabs.
     ///
     /// # Errors
     /// Returns an error when the database transaction fails.
@@ -97,12 +95,12 @@ impl BrowserCore {
         Ok(self.store.spaces()?)
     }
 
-    /// Creates and persists a page, assigning a stable V7 UUID.
+    /// Creates and persists a global tab, assigning a stable V7 UUID.
     ///
     /// # Errors
-    /// Returns an error when the Space is missing or the database transaction fails.
-    pub fn create_page(&mut self, space_id: &str, url: &Url) -> Result<Page> {
-        let page = self.store.create_page(space_id, url.as_str())?;
+    /// Returns an error when the database transaction fails.
+    pub fn create_page(&mut self, url: &Url) -> Result<Page> {
+        let page = self.store.create_page(url.as_str())?;
         let id = Uuid::parse_str(&page.id).context("store generated invalid page UUID")?;
         self.session.open_page(PageId::from_uuid(id));
         Ok(page)
@@ -213,12 +211,12 @@ impl BrowserCore {
         Ok(rendered)
     }
 
-    /// Lists persisted pages in a Space.
+    /// Lists persisted global tabs.
     ///
     /// # Errors
     /// Returns an error when the database query fails.
-    pub fn pages(&self, space_id: &str) -> Result<Vec<Page>> {
-        Ok(self.store.pages(space_id)?)
+    pub fn pages(&self) -> Result<Vec<Page>> {
+        Ok(self.store.pages()?)
     }
 
     /// Saves the selected Space and page IDs for restart restoration.
@@ -735,15 +733,14 @@ mod tests {
         let url = Url::from_file_path(fixture).unwrap();
         {
             let mut core = BrowserCore::open(&path).unwrap();
-            let space = core.create_space("Research").unwrap();
-            let page = core.create_page(&space.id, &url).unwrap();
+            core.create_space("Research").unwrap();
+            let page = core.create_page(&url).unwrap();
             let rendered = core.navigate(&page, &url, 1280.0).unwrap();
             assert_eq!(rendered.title, "Archetype V3 Fixture");
         }
         {
             let mut core = BrowserCore::open(&path).unwrap();
-            let spaces = core.spaces().unwrap();
-            let pages = core.pages(&spaces[0].id).unwrap();
+            let pages = core.pages().unwrap();
             assert_eq!(pages[0].title, "Archetype V3 Fixture");
             assert_eq!(pages[0].url, url.as_str());
             let reloaded = core.reload(&pages[0], 1280.0).unwrap();
@@ -767,8 +764,7 @@ mod tests {
         let first_url = Url::from_file_path(first_path).unwrap();
         let second_url = Url::from_file_path(second_path).unwrap();
         let mut core = BrowserCore::in_memory().unwrap();
-        let space = core.create_space("Research").unwrap();
-        let page = core.create_page(&space.id, &first_url).unwrap();
+        let page = core.create_page(&first_url).unwrap();
         core.navigate(&page, &first_url, 1280.0).unwrap();
         core.navigate(&page, &second_url, 1280.0).unwrap();
         assert_eq!(

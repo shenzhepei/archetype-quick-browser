@@ -210,10 +210,7 @@ impl QuickBrowser {
             .0
             .filter(|id| spaces.iter().any(|space| &space.id == id))
             .or_else(|| spaces.first().map(|space| space.id.clone()));
-        let pages = selected_space
-            .as_deref()
-            .and_then(|id| core.pages(id).ok())
-            .unwrap_or_default();
+        let pages = core.pages().unwrap_or_default();
         let selected_page = saved
             .1
             .filter(|id| pages.iter().any(|page| &page.id == id))
@@ -312,15 +309,7 @@ impl QuickBrowser {
             .find(|space| space.id == id)
             .map(|space| space.name.clone())
             .unwrap_or_default();
-        self.pages = self.core.pages(id).unwrap_or_default();
-        self.selected_page = self.pages.first().map(|page| page.id.clone());
-        let address = self
-            .selected_page_record()
-            .map(|page| page.url.clone())
-            .unwrap_or_default();
-        self.rendered = None;
         self.set_space_name(name, window, cx);
-        self.set_address(address, window, cx);
         self.persist_selection();
         cx.notify();
     }
@@ -372,19 +361,7 @@ impl QuickBrowser {
                     .and_then(|space_id| self.spaces.iter().find(|space| space.id == space_id))
                     .map(|space| space.name.clone())
                     .unwrap_or_default();
-                self.pages = self
-                    .selected_space
-                    .as_deref()
-                    .and_then(|space_id| self.core.pages(space_id).ok())
-                    .unwrap_or_default();
-                self.selected_page = self.pages.first().map(|page| page.id.clone());
-                let address = self
-                    .selected_page_record()
-                    .map(|page| page.url.clone())
-                    .unwrap_or_default();
-                self.rendered = None;
                 self.set_space_name(name, window, cx);
-                self.set_address(address, window, cx);
                 self.persist_selection();
             }
             Err(error) => self.error = Some(ErrorView::application(self.language, &error)),
@@ -393,11 +370,8 @@ impl QuickBrowser {
     }
 
     fn add_page(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(space_id) = self.selected_space.clone() else {
-            return;
-        };
         let url = fixture_url();
-        match self.core.create_page(&space_id, &url) {
+        match self.core.create_page(&url) {
             Ok(page) => {
                 self.selected_page = Some(page.id.clone());
                 self.pages.push(page);
@@ -460,10 +434,7 @@ impl QuickBrowser {
     fn navigate_to(&mut self, url: &Url, window: &mut Window, cx: &mut Context<Self>) {
         self.error = None;
         if self.selected_page_record().is_none() {
-            let Some(space_id) = self.selected_space.clone() else {
-                return;
-            };
-            match self.core.create_page(&space_id, url) {
+            match self.core.create_page(url) {
                 Ok(page) => {
                     self.selected_page = Some(page.id.clone());
                     self.pages.push(page);

@@ -21,18 +21,31 @@ CREATE TABLE IF NOT EXISTS spaces (
 );
 CREATE TABLE IF NOT EXISTS pages (
   id TEXT PRIMARY KEY,
-  space_id TEXT NOT NULL REFERENCES spaces(id) ON DELETE CASCADE,
   url TEXT NOT NULL,
   title TEXT NOT NULL DEFAULT '',
   position INTEGER NOT NULL,
   last_visited_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS bookmarks (
+  id TEXT PRIMARY KEY,
+  space_id TEXT NOT NULL REFERENCES spaces(id) ON DELETE CASCADE,
+  parent_id TEXT REFERENCES bookmarks(id) ON DELETE CASCADE,
+  kind TEXT NOT NULL CHECK(kind IN ('bookmark', 'folder')),
+  title TEXT NOT NULL,
+  url TEXT,
+  position INTEGER NOT NULL,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  CHECK((kind = 'folder' AND url IS NULL) OR (kind = 'bookmark' AND url IS NOT NULL))
 );
 CREATE TABLE IF NOT EXISTS app_state (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL
 );
 INSERT OR IGNORE INTO schema_migrations(version, applied_at)
-VALUES (1, CAST(unixepoch('subsec') * 1000 AS INTEGER));
+VALUES
+  (1, CAST(unixepoch('subsec') * 1000 AS INTEGER)),
+  (2, CAST(unixepoch('subsec') * 1000 AS INTEGER));
 ";
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -45,7 +58,6 @@ pub struct Space {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Page {
     pub id: String,
-    pub space_id: String,
     pub url: String,
     pub title: String,
     pub position: i64,
@@ -64,7 +76,7 @@ pub struct Store {
 }
 
 impl Store {
-    /// Opens or creates a schema-v1 database.
+    /// Opens or creates a schema-v2 database.
     ///
     /// # Errors
     /// Returns [`StoreError`] when `SQLite` cannot open, configure, or migrate the database.
@@ -87,10 +99,11 @@ impl Store {
         let connection = Connection::open(path)?;
         Self::configure(&connection)?;
         connection.execute_batch(SCHEMA)?;
+        Self::migrate_legacy_pages(&connection)?;
         Ok(Self { connection })
     }
 
-    /// Creates an isolated schema-v1 database for tests and transient use.
+    /// Creates an isolated schema-v2 database for tests and transient use.
     ///
     /// # Errors
     /// Returns [`StoreError`] when `SQLite` cannot create, configure, or migrate the database.
@@ -98,6 +111,7 @@ impl Store {
         let connection = Connection::open_in_memory()?;
         Self::configure(&connection)?;
         connection.execute_batch(SCHEMA)?;
+        Self::migrate_legacy_pages(&connection)?;
         Ok(Self { connection })
     }
 
@@ -106,6 +120,40 @@ impl Store {
         connection.pragma_update(None, "journal_mode", "WAL")?;
         connection.pragma_update(None, "synchronous", "NORMAL")?;
         connection.busy_timeout(std::time::Duration::from_secs(5))?;
+        Ok(())
+    }
+
+    fn migrate_legacy_pages(connection: &Connection) -> Result<(), rusqlite::Error> {
+        let has_space_id = connection.query_row(
+            "SELECT EXISTS(SELECT 1 FROM pragma_table_info('pages') WHERE name = 'space_id')",
+            [],
+            |row| row.get::<_, bool>(0),
+        )?;
+        if !has_space_id {
+            return Ok(());
+        }
+
+        connection.execute_batch(
+            "BEGIN IMMEDIATE;
+             CREATE TABLE pages_v2 (
+               id TEXT PRIMARY KEY,
+               url TEXT NOT NULL,
+               title TEXT NOT NULL DEFAULT '',
+               position INTEGER NOT NULL,
+               last_visited_at INTEGER NOT NULL
+             );
+             INSERT INTO pages_v2(id, url, title, position, last_visited_at)
+             SELECT p.id, p.url, p.title,
+                    ROW_NUMBER() OVER (ORDER BY s.position, p.position, p.id) - 1,
+                    p.last_visited_at
+             FROM pages p
+             JOIN spaces s ON s.id = p.space_id;
+             DROP TABLE pages;
+             ALTER TABLE pages_v2 RENAME TO pages;
+             INSERT OR IGNORE INTO schema_migrations(version, applied_at)
+             VALUES (2, CAST(unixepoch('subsec') * 1000 AS INTEGER));
+             COMMIT;",
+        )?;
         Ok(())
     }
 
@@ -145,7 +193,7 @@ impl Store {
         )? == 1)
     }
 
-    /// Deletes a Space, cascades its pages, and compacts Space positions.
+    /// Deletes a Space, cascades its bookmarks, and compacts Space positions.
     ///
     /// # Errors
     /// Returns [`StoreError`] when the transaction cannot be executed or committed.
@@ -179,27 +227,26 @@ impl Store {
             .collect::<Result<_, _>>()?)
     }
 
-    /// Inserts a page at the end of a Space's page ordering.
+    /// Inserts a page at the end of the global tab ordering.
     ///
     /// # Errors
-    /// Returns [`StoreError`] when the Space is missing or the transaction fails.
-    pub fn create_page(&mut self, space_id: &str, url: &str) -> Result<Page, StoreError> {
+    /// Returns [`StoreError`] when the transaction fails.
+    pub fn create_page(&mut self, url: &str) -> Result<Page, StoreError> {
         let transaction = self.connection.transaction()?;
         let position: i64 = transaction.query_row(
-            "SELECT COALESCE(MAX(position), -1) + 1 FROM pages WHERE space_id = ?",
-            [space_id],
+            "SELECT COALESCE(MAX(position), -1) + 1 FROM pages",
+            [],
             |row| row.get(0),
         )?;
         let page = Page {
             id: Uuid::now_v7().to_string(),
-            space_id: space_id.to_owned(),
             url: url.to_owned(),
             title: String::new(),
             position,
         };
         transaction.execute(
-            "INSERT INTO pages(id, space_id, url, title, position, last_visited_at) VALUES (?, ?, ?, '', ?, ?)",
-            params![page.id, page.space_id, page.url, page.position, now_ms()],
+            "INSERT INTO pages(id, url, title, position, last_visited_at) VALUES (?, ?, '', ?, ?)",
+            params![page.id, page.url, page.position, now_ms()],
         )?;
         transaction.commit()?;
         Ok(page)
@@ -227,37 +274,38 @@ impl Store {
     /// Returns [`StoreError`] when the transaction cannot be executed or committed.
     pub fn delete_page(&mut self, id: &str) -> Result<bool, StoreError> {
         let transaction = self.connection.transaction()?;
-        let space_id: Option<String> = transaction
-            .query_row("SELECT space_id FROM pages WHERE id = ?", [id], |row| {
-                row.get(0)
-            })
-            .optional()?;
-        let Some(space_id) = space_id else {
+        let exists = transaction.query_row(
+            "SELECT EXISTS(SELECT 1 FROM pages WHERE id = ?)",
+            [id],
+            |row| row.get::<_, bool>(0),
+        )?;
+        if !exists {
             return Ok(false);
-        };
+        }
         transaction.execute("DELETE FROM pages WHERE id = ?", [id])?;
         transaction.execute(
-            "WITH ranked AS (SELECT id, ROW_NUMBER() OVER (ORDER BY position, id) - 1 AS next FROM pages WHERE space_id = ?) UPDATE pages SET position = (SELECT next FROM ranked WHERE ranked.id = pages.id) WHERE space_id = ?",
-            params![space_id, space_id],
+            "WITH ranked AS (SELECT id, ROW_NUMBER() OVER (ORDER BY position, id) - 1 AS next FROM pages) UPDATE pages SET position = (SELECT next FROM ranked WHERE ranked.id = pages.id)",
+            [],
         )?;
         transaction.commit()?;
         Ok(true)
     }
 
-    /// Lists pages belonging to a Space in their stable UI order.
+    /// Lists global tabs in their stable UI order.
     ///
     /// # Errors
     /// Returns [`StoreError`] when `SQLite` cannot prepare or execute the query.
-    pub fn pages(&self, space_id: &str) -> Result<Vec<Page>, StoreError> {
-        let mut statement = self.connection.prepare("SELECT id, space_id, url, title, position FROM pages WHERE space_id = ? ORDER BY position, id")?;
+    pub fn pages(&self) -> Result<Vec<Page>, StoreError> {
+        let mut statement = self
+            .connection
+            .prepare("SELECT id, url, title, position FROM pages ORDER BY position, id")?;
         Ok(statement
-            .query_map([space_id], |row| {
+            .query_map([], |row| {
                 Ok(Page {
                     id: row.get(0)?,
-                    space_id: row.get(1)?,
-                    url: row.get(2)?,
-                    title: row.get(3)?,
-                    position: row.get(4)?,
+                    url: row.get(1)?,
+                    title: row.get(2)?,
+                    position: row.get(3)?,
                 })
             })?
             .collect::<Result<_, _>>()?)
@@ -328,15 +376,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn persists_spaces_pages_and_cascades_delete() {
+    fn space_deletion_does_not_delete_global_tabs() {
         let mut store = Store::in_memory().unwrap();
         let space = store.create_space("Research").unwrap();
-        store
-            .create_page(&space.id, "file:///fixture.html")
-            .unwrap();
-        assert_eq!(store.pages(&space.id).unwrap().len(), 1);
+        store.create_page("file:///fixture.html").unwrap();
+        assert_eq!(store.pages().unwrap().len(), 1);
         store.delete_space(&space.id).unwrap();
-        assert!(store.pages(&space.id).unwrap().is_empty());
+        assert_eq!(store.pages().unwrap().len(), 1);
     }
 
     #[test]
@@ -391,12 +437,45 @@ mod tests {
     #[test]
     fn deleting_page_compacts_positions() {
         let mut store = Store::in_memory().unwrap();
-        let space = store.create_space("Research").unwrap();
-        let first = store.create_page(&space.id, "file:///one.html").unwrap();
-        store.create_page(&space.id, "file:///two.html").unwrap();
+        let first = store.create_page("file:///one.html").unwrap();
+        store.create_page("file:///two.html").unwrap();
         assert!(store.delete_page(&first.id).unwrap());
-        let pages = store.pages(&space.id).unwrap();
+        let pages = store.pages().unwrap();
         assert_eq!(pages.len(), 1);
         assert_eq!(pages[0].position, 0);
+    }
+
+    #[test]
+    fn migrates_space_pages_to_global_tabs_in_stable_order() {
+        let directory = std::env::temp_dir().join(format!("archetype-store-{}", Uuid::now_v7()));
+        fs::create_dir(&directory).unwrap();
+        let path = directory.join("profile.db");
+        let connection = Connection::open(&path).unwrap();
+        connection
+            .execute_batch(
+                "CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at INTEGER NOT NULL);
+                 CREATE TABLE spaces (id TEXT PRIMARY KEY, name TEXT NOT NULL, position INTEGER NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
+                 CREATE TABLE pages (id TEXT PRIMARY KEY, space_id TEXT NOT NULL REFERENCES spaces(id) ON DELETE CASCADE, url TEXT NOT NULL, title TEXT NOT NULL DEFAULT '', position INTEGER NOT NULL, last_visited_at INTEGER NOT NULL);
+                 CREATE TABLE app_state (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+                 INSERT INTO spaces VALUES ('later', 'Later', 1, 0, 0), ('first', 'First', 0, 0, 0);
+                 INSERT INTO pages VALUES ('b', 'later', 'https://b.example', 'B', 0, 0), ('a', 'first', 'https://a.example', 'A', 0, 0);",
+            )
+            .unwrap();
+        drop(connection);
+
+        let mut store = Store::open(&path).unwrap();
+        let pages = store.pages().unwrap();
+        assert_eq!(
+            pages
+                .iter()
+                .map(|page| page.id.as_str())
+                .collect::<Vec<_>>(),
+            ["a", "b"]
+        );
+        store.delete_space("first").unwrap();
+        assert_eq!(store.pages().unwrap().len(), 2);
+
+        drop(store);
+        fs::remove_dir_all(directory).unwrap();
     }
 }
