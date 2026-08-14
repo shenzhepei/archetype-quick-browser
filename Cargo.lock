@@ -118,6 +118,7 @@ dependencies = [
  "gpui-component",
  "gpui-component-assets",
  "image",
+ "sys-locale",
  "url",
  "uuid",
 ]

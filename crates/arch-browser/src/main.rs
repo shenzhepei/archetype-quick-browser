@@ -1,3 +1,4 @@
+mod i18n;
 mod ui;
 
 use std::{env, path::PathBuf};

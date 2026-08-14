@@ -11,8 +11,9 @@ cargo run -p arch-browser
 ```
 
 The desktop app stores its profile in the platform application-support directory. New pages open
-the first deterministic fixture by default. To inspect a page through the rendering pipeline
-without opening a window:
+the first deterministic fixture by default. The desktop shell follows the operating system locale:
+Chinese locales (`zh*`) use Chinese, while every other locale falls back to English. To inspect a
+page through the rendering pipeline without opening a window:
 
 ```bash
 cargo run -p arch-browser -- --inspect fixtures/pages/05-image/index.html

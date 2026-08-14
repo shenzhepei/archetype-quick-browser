@@ -22,6 +22,8 @@ use gpui_component::{
 };
 use url::Url;
 
+use crate::i18n::Language;
+
 struct Assets;
 
 impl AssetSource for Assets {
@@ -117,36 +119,36 @@ struct ErrorView {
 }
 
 impl ErrorView {
-    fn input(detail: impl Into<String>) -> Self {
+    fn input(language: Language, detail: impl Into<String>) -> Self {
         Self {
-            title: "Invalid input",
+            title: language.invalid_input(),
             detail: detail.into(),
         }
     }
 
-    fn application(error: &impl std::fmt::Display) -> Self {
+    fn application(language: Language, error: &impl std::fmt::Display) -> Self {
         Self {
-            title: "Application error",
+            title: language.application_error(),
             detail: error.to_string(),
         }
     }
 
-    fn navigation(error: &anyhow::Error) -> Self {
+    fn navigation(language: Language, error: &anyhow::Error) -> Self {
         let kind = error
             .chain()
             .find_map(|cause| cause.downcast_ref::<LoadError>())
             .map(LoadError::kind);
         let title = match kind {
             Some(LoadErrorKind::UnsupportedScheme | LoadErrorKind::InvalidFileUrl) => {
-                "Unsupported address"
+                language.unsupported_address()
             }
-            Some(LoadErrorKind::ResourceTooLarge) => "Resource too large",
-            Some(LoadErrorKind::File) => "File unavailable",
-            Some(LoadErrorKind::Timeout) => "Request timed out",
-            Some(LoadErrorKind::Connection) => "Connection failed",
-            Some(LoadErrorKind::HttpStatus) => "HTTP request failed",
-            Some(LoadErrorKind::Network) => "Secure network request failed",
-            None => "Rendering failed",
+            Some(LoadErrorKind::ResourceTooLarge) => language.resource_too_large(),
+            Some(LoadErrorKind::File) => language.file_unavailable(),
+            Some(LoadErrorKind::Timeout) => language.request_timed_out(),
+            Some(LoadErrorKind::Connection) => language.connection_failed(),
+            Some(LoadErrorKind::HttpStatus) => language.http_request_failed(),
+            Some(LoadErrorKind::Network) => language.secure_network_request_failed(),
+            None => language.rendering_failed(),
         };
         Self {
             title,
@@ -176,6 +178,7 @@ pub fn run() {
 }
 
 struct QuickBrowser {
+    language: Language,
     core: BrowserCore,
     spaces: Vec<Space>,
     pages: Vec<Page>,
@@ -190,6 +193,7 @@ struct QuickBrowser {
 
 impl QuickBrowser {
     fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let language = Language::system();
         let profile = profile_path();
         let mut core = BrowserCore::open(&profile).unwrap_or_else(|error| {
             eprintln!("profile unavailable at {}: {error}", profile.display());
@@ -197,7 +201,7 @@ impl QuickBrowser {
         });
         let mut spaces = core.spaces().unwrap_or_default();
         if spaces.is_empty() {
-            if let Ok(space) = core.create_space("Start") {
+            if let Ok(space) = core.create_space(language.default_space_name()) {
                 spaces.push(space);
             }
         }
@@ -226,9 +230,10 @@ impl QuickBrowser {
             .unwrap_or_default();
 
         let address_input =
-            cx.new(|cx| InputState::new(window, cx).placeholder("Search or enter an address"));
+            cx.new(|cx| InputState::new(window, cx).placeholder(language.address_placeholder()));
         address_input.update(cx, |input, cx| input.set_value(address, window, cx));
-        let space_input = cx.new(|cx| InputState::new(window, cx).placeholder("Space name"));
+        let space_input =
+            cx.new(|cx| InputState::new(window, cx).placeholder(language.space_name_placeholder()));
         space_input.update(cx, |input, cx| input.set_value(space_name, window, cx));
 
         let subscriptions = vec![
@@ -245,6 +250,7 @@ impl QuickBrowser {
         ];
 
         Self {
+            language,
             core,
             spaces,
             pages,
@@ -280,7 +286,7 @@ impl QuickBrowser {
 
     fn add_space(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.error = None;
-        let name = format!("Space {}", self.spaces.len() + 1);
+        let name = self.language.new_space_name(self.spaces.len() + 1);
         match self.core.create_space(&name) {
             Ok(space) => {
                 self.selected_space = Some(space.id.clone());
@@ -292,7 +298,7 @@ impl QuickBrowser {
                 self.set_address("", window, cx);
                 self.persist_selection();
             }
-            Err(error) => self.error = Some(ErrorView::application(&error)),
+            Err(error) => self.error = Some(ErrorView::application(self.language, &error)),
         }
         cx.notify();
     }
@@ -323,7 +329,10 @@ impl QuickBrowser {
         self.error = None;
         let name = self.space_input.read(cx).value().trim().to_owned();
         if name.is_empty() {
-            self.error = Some(ErrorView::input("Space name cannot be empty"));
+            self.error = Some(ErrorView::input(
+                self.language,
+                self.language.space_name_empty(),
+            ));
             cx.notify();
             return;
         }
@@ -337,8 +346,13 @@ impl QuickBrowser {
                 }
                 self.set_space_name(name, window, cx);
             }
-            Ok(false) => self.error = Some(ErrorView::input("Selected Space no longer exists")),
-            Err(error) => self.error = Some(ErrorView::application(&error)),
+            Ok(false) => {
+                self.error = Some(ErrorView::input(
+                    self.language,
+                    self.language.selected_space_missing(),
+                ));
+            }
+            Err(error) => self.error = Some(ErrorView::application(self.language, &error)),
         }
         cx.notify();
     }
@@ -373,7 +387,7 @@ impl QuickBrowser {
                 self.set_address(address, window, cx);
                 self.persist_selection();
             }
-            Err(error) => self.error = Some(ErrorView::application(&error)),
+            Err(error) => self.error = Some(ErrorView::application(self.language, &error)),
         }
         cx.notify();
     }
@@ -392,7 +406,7 @@ impl QuickBrowser {
                 self.navigate_to(&url, window, cx);
             }
             Err(error) => {
-                self.error = Some(ErrorView::application(&error));
+                self.error = Some(ErrorView::application(self.language, &error));
                 cx.notify();
             }
         }
@@ -416,7 +430,7 @@ impl QuickBrowser {
             return;
         };
         if let Err(error) = self.core.close_page(&page) {
-            self.error = Some(ErrorView::application(&error));
+            self.error = Some(ErrorView::application(self.language, &error));
             cx.notify();
             return;
         }
@@ -434,10 +448,10 @@ impl QuickBrowser {
 
     fn navigate_current(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let address = self.address_input.read(cx).value();
-        match parse_address(&address) {
+        match parse_address(&address, self.language) {
             Ok(url) => self.navigate_to(&url, window, cx),
             Err(error) => {
-                self.error = Some(ErrorView::input(error));
+                self.error = Some(ErrorView::input(self.language, error));
                 cx.notify();
             }
         }
@@ -456,7 +470,7 @@ impl QuickBrowser {
                     self.persist_selection();
                 }
                 Err(error) => {
-                    self.error = Some(ErrorView::application(&error));
+                    self.error = Some(ErrorView::application(self.language, &error));
                     cx.notify();
                     return;
                 }
@@ -469,7 +483,7 @@ impl QuickBrowser {
         match self.core.navigate(&page, url, 960.0) {
             Ok(rendered) => self.apply_rendered(&page, rendered, window, cx),
             Err(error) => {
-                self.error = Some(ErrorView::navigation(&error));
+                self.error = Some(ErrorView::navigation(self.language, &error));
                 cx.notify();
             }
         }
@@ -493,7 +507,7 @@ impl QuickBrowser {
         match result {
             Ok(rendered) => self.apply_rendered(&page, rendered, window, cx),
             Err(error) => {
-                self.error = Some(ErrorView::navigation(&error));
+                self.error = Some(ErrorView::navigation(self.language, &error));
                 cx.notify();
             }
         }
@@ -525,7 +539,7 @@ impl QuickBrowser {
             self.selected_space.as_deref(),
             self.selected_page.as_deref(),
         ) {
-            self.error = Some(ErrorView::application(&error));
+            self.error = Some(ErrorView::application(self.language, &error));
         }
     }
 
@@ -604,7 +618,12 @@ impl QuickBrowser {
                     .pt_3()
                     .pb_2()
                     .justify_between()
-                    .child(div().text_sm().font_semibold().child("SPACES"))
+                    .child(
+                        div()
+                            .text_sm()
+                            .font_semibold()
+                            .child(self.language.spaces()),
+                    )
                     .child(
                         Button::new("add-space")
                             .ghost()
@@ -649,7 +668,7 @@ impl QuickBrowser {
                     .border_t_1()
                     .border_color(cx.theme().border)
                     .justify_between()
-                    .child(div().text_sm().font_semibold().child("PAGES"))
+                    .child(div().text_sm().font_semibold().child(self.language.pages()))
                     .child(
                         Button::new("add-page")
                             .ghost()
@@ -754,7 +773,7 @@ impl QuickBrowser {
                 .justify_center()
                 .gap_3()
                 .text_color(cx.theme().muted_foreground)
-                .child("Open a page to begin")
+                .child(self.language.open_page_to_begin())
                 .into_any_element();
         };
 
@@ -775,7 +794,12 @@ impl QuickBrowser {
                 .border_1()
                 .border_color(cx.theme().border)
                 .rounded_lg()
-                .child(div().font_semibold().text_sm().child("Diagnostics"))
+                .child(
+                    div()
+                        .font_semibold()
+                        .text_sm()
+                        .child(self.language.diagnostics()),
+                )
                 .children(rendered.diagnostics.iter().cloned().map(|item| {
                     div()
                         .text_xs()
@@ -912,7 +936,7 @@ impl Render for QuickBrowser {
                             div()
                                 .text_xs()
                                 .text_color(cx.theme().muted_foreground)
-                                .child("V3 Developer Preview"),
+                                .child(self.language.developer_preview()),
                         ),
                 ),
             )
@@ -958,26 +982,25 @@ fn fixture_url() -> Url {
     Url::from_file_path(path).expect("fixture path must be representable as a URL")
 }
 
-fn parse_address(address: &str) -> Result<Url, String> {
+fn parse_address(address: &str, language: Language) -> Result<Url, String> {
     let address = address.trim();
     if address.is_empty() {
-        return Err("address cannot be empty".to_owned());
+        return Err(language.address_empty().to_owned());
     }
     if address.contains("://") {
-        return Url::parse(address).map_err(|error| format!("invalid URL: {error}"));
+        return Url::parse(address).map_err(|error| language.invalid_url(error));
     }
     if let Ok(path) = PathBuf::from(address).canonicalize() {
-        return Url::from_file_path(path)
-            .map_err(|()| "path cannot be represented as a file URL".to_owned());
+        return Url::from_file_path(path).map_err(|()| language.invalid_file_path().to_owned());
     }
     if looks_like_host(address) {
         return Url::parse(&format!("https://{address}"))
-            .map_err(|error| format!("invalid URL: {error}"));
+            .map_err(|error| language.invalid_url(error));
     }
     if let Ok(url) = Url::parse(address) {
         return Ok(url);
     }
-    Err(format!("invalid address or missing path: {address}"))
+    Err(language.invalid_address(address))
 }
 
 fn looks_like_host(address: &str) -> bool {
@@ -1015,11 +1038,15 @@ mod tests {
     #[test]
     fn address_parser_adds_https_to_hostnames() {
         assert_eq!(
-            parse_address("baidu.com").unwrap().as_str(),
+            parse_address("baidu.com", Language::English)
+                .unwrap()
+                .as_str(),
             "https://baidu.com/"
         );
         assert_eq!(
-            parse_address("localhost:8080").unwrap().as_str(),
+            parse_address("localhost:8080", Language::English)
+                .unwrap()
+                .as_str(),
             "https://localhost:8080/"
         );
     }
@@ -1027,7 +1054,9 @@ mod tests {
     #[test]
     fn address_parser_preserves_explicit_urls() {
         assert_eq!(
-            parse_address(" http://example.com/docs ").unwrap().as_str(),
+            parse_address(" http://example.com/docs ", Language::English)
+                .unwrap()
+                .as_str(),
             "http://example.com/docs"
         );
     }
@@ -1038,12 +1067,19 @@ mod tests {
             .join("../../fixtures/pages/01-document/index.html")
             .canonicalize()
             .unwrap();
-        let parsed = parse_address(path.to_str().unwrap()).unwrap();
+        let parsed = parse_address(path.to_str().unwrap(), Language::English).unwrap();
         assert_eq!(parsed.to_file_path().unwrap(), path);
     }
 
     #[test]
     fn address_parser_rejects_empty_input() {
-        assert_eq!(parse_address("  ").unwrap_err(), "address cannot be empty");
+        assert_eq!(
+            parse_address("  ", Language::English).unwrap_err(),
+            "Address cannot be empty"
+        );
+        assert_eq!(
+            parse_address("  ", Language::Chinese).unwrap_err(),
+            "地址不能为空"
+        );
     }
 }
