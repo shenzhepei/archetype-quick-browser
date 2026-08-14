@@ -136,7 +136,18 @@ impl Language {
     }
 
     pub(crate) const fn remove_bookmark(self) -> &'static str {
-        self.select("删除书签", "Remove bookmark")
+        self.select("删除书签或文件夹", "Remove bookmark or folder")
+    }
+
+    pub(crate) const fn rename_bookmark(self) -> &'static str {
+        self.select("重命名书签或文件夹", "Rename bookmark or folder")
+    }
+
+    pub(crate) const fn bookmark_name_empty(self) -> &'static str {
+        self.select(
+            "书签或文件夹名称不能为空",
+            "Bookmark or folder name cannot be empty",
+        )
     }
 
     pub(crate) const fn bookmarks(self) -> &'static str {

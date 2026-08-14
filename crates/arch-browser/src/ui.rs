@@ -18,7 +18,7 @@ use gpui_component::{
     button::{Button, ButtonVariants as _},
     h_flex,
     input::{Input, InputEvent, InputState},
-    menu::{DropdownMenu as _, PopupMenu, PopupMenuItem},
+    menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenu, PopupMenuItem},
     v_flex,
 };
 use url::Url;
@@ -200,6 +200,7 @@ struct QuickBrowser {
     renaming_space: bool,
     creating_bookmark_folder: bool,
     bookmark_folder_parent: Option<String>,
+    renaming_bookmark: Option<String>,
     subscriptions: Vec<Subscription>,
 }
 
@@ -264,7 +265,7 @@ impl QuickBrowser {
             }),
             cx.subscribe_in(&folder_input, window, |this, _, event, _window, cx| {
                 if matches!(event, InputEvent::PressEnter { .. }) {
-                    this.create_bookmark_folder(cx);
+                    this.save_bookmark_editor(cx);
                 }
             }),
         ];
@@ -285,6 +286,7 @@ impl QuickBrowser {
             renaming_space: false,
             creating_bookmark_folder: false,
             bookmark_folder_parent: None,
+            renaming_bookmark: None,
             subscriptions,
         }
     }
@@ -330,6 +332,7 @@ impl QuickBrowser {
         self.error = None;
         self.creating_bookmark_folder = false;
         self.bookmark_folder_parent = None;
+        self.renaming_bookmark = None;
         self.selected_space = Some(id.to_owned());
         let name = self
             .spaces
@@ -614,6 +617,50 @@ impl QuickBrowser {
         cx.notify();
     }
 
+    fn begin_rename_bookmark(
+        &mut self,
+        id: String,
+        title: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.creating_bookmark_folder = false;
+        self.bookmark_folder_parent = None;
+        self.renaming_bookmark = Some(id);
+        self.folder_input.update(cx, |input, cx| {
+            input.set_value(title, window, cx);
+            input.focus(window, cx);
+        });
+        cx.notify();
+    }
+
+    fn rename_bookmark(&mut self, cx: &mut Context<Self>) {
+        self.error = None;
+        let title = self.folder_input.read(cx).value().trim().to_owned();
+        if title.is_empty() {
+            self.error = Some(ErrorView::input(
+                self.language,
+                self.language.bookmark_name_empty(),
+            ));
+            cx.notify();
+            return;
+        }
+        let Some(id) = self.renaming_bookmark.clone() else {
+            return;
+        };
+        match self.core.rename_bookmark(&id, &title) {
+            Ok(true) => {
+                if let Some(bookmark) = self.bookmarks.iter_mut().find(|item| item.id == id) {
+                    bookmark.title.clone_from(&title);
+                }
+                self.renaming_bookmark = None;
+            }
+            Ok(false) => self.renaming_bookmark = None,
+            Err(error) => self.error = Some(ErrorView::application(self.language, &error)),
+        }
+        cx.notify();
+    }
+
     fn begin_create_bookmark_folder(
         &mut self,
         parent_id: Option<String>,
@@ -629,6 +676,7 @@ impl QuickBrowser {
         let name = self.language.new_folder_name(number);
         self.creating_bookmark_folder = true;
         self.bookmark_folder_parent = parent_id;
+        self.renaming_bookmark = None;
         self.folder_input.update(cx, |input, cx| {
             input.set_value(name, window, cx);
             input.focus(window, cx);
@@ -670,7 +718,16 @@ impl QuickBrowser {
     fn cancel_create_bookmark_folder(&mut self, cx: &mut Context<Self>) {
         self.creating_bookmark_folder = false;
         self.bookmark_folder_parent = None;
+        self.renaming_bookmark = None;
         cx.notify();
+    }
+
+    fn save_bookmark_editor(&mut self, cx: &mut Context<Self>) {
+        if self.renaming_bookmark.is_some() {
+            self.rename_bookmark(cx);
+        } else {
+            self.create_bookmark_folder(cx);
+        }
     }
 
     fn persist_selection(&mut self) {
@@ -890,10 +947,12 @@ impl QuickBrowser {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let target = url.to_owned();
-        let delete_id = bookmark.id.clone();
+        let browser = cx.entity();
+        let context_id = bookmark.id.clone();
+        let context_title = bookmark.title.clone();
+        let language = self.language;
         h_flex()
             .flex_shrink_0()
-            .gap_0p5()
             .child(
                 Button::new(SharedString::from(format!("bookmark-{}", bookmark.id)))
                     .ghost()
@@ -903,30 +962,21 @@ impl QuickBrowser {
                         this.open_bookmark(&target, window, cx);
                     })),
             )
-            .child(
-                Button::new(SharedString::from(format!(
-                    "delete-bookmark-{}",
-                    bookmark.id
-                )))
-                .ghost()
-                .xsmall()
-                .icon(AppIcon::Close)
-                .tooltip(self.language.remove_bookmark())
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    this.delete_bookmark(&delete_id, cx);
-                })),
-            )
+            .context_menu(move |menu, _, _| {
+                bookmark_context_menu(menu, &context_id, &context_title, &browser, language)
+            })
             .into_any_element()
     }
 
     fn bookmark_folder_row(&self, bookmark: &Bookmark, cx: &mut Context<Self>) -> AnyElement {
         let browser = cx.entity();
+        let menu_browser = browser.clone();
         let language = self.language;
-        let delete_id = bookmark.id.clone();
         let folder = bookmark.clone();
+        let context_id = bookmark.id.clone();
+        let context_title = bookmark.title.clone();
         h_flex()
             .flex_shrink_0()
-            .gap_0p5()
             .child(
                 Button::new(SharedString::from(format!(
                     "bookmark-folder-{}",
@@ -939,27 +989,24 @@ impl QuickBrowser {
                 .dropdown_caret(true)
                 .tooltip(language.bookmark_folder())
                 .dropdown_menu(move |menu, window, cx| {
-                    populate_bookmark_folder_menu(menu, &folder, &browser, language, window, cx)
+                    populate_bookmark_folder_menu(
+                        menu,
+                        &folder,
+                        &menu_browser,
+                        language,
+                        window,
+                        cx,
+                    )
                 }),
             )
-            .child(
-                Button::new(SharedString::from(format!(
-                    "delete-bookmark-folder-{}",
-                    bookmark.id
-                )))
-                .ghost()
-                .xsmall()
-                .icon(AppIcon::Close)
-                .tooltip(language.remove_bookmark())
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    this.delete_bookmark(&delete_id, cx);
-                })),
-            )
+            .context_menu(move |menu, _, _| {
+                bookmark_context_menu(menu, &context_id, &context_title, &browser, language)
+            })
             .into_any_element()
     }
 
     fn bookmark_folder_editor(&self, cx: &mut Context<Self>) -> AnyElement {
-        if !self.creating_bookmark_folder {
+        if !self.creating_bookmark_folder && self.renaming_bookmark.is_none() {
             return Button::new("new-bookmark-folder")
                 .ghost()
                 .xsmall()
@@ -986,7 +1033,7 @@ impl QuickBrowser {
                     .icon(AppIcon::Rename)
                     .tooltip(self.language.save())
                     .on_click(cx.listener(|this, _, _, cx| {
-                        this.create_bookmark_folder(cx);
+                        this.save_bookmark_editor(cx);
                     })),
             )
             .child(
@@ -1389,6 +1436,38 @@ fn add_bookmark_menu_item(
     }
 }
 
+fn bookmark_context_menu(
+    menu: PopupMenu,
+    id: &str,
+    title: &str,
+    browser: &Entity<QuickBrowser>,
+    language: Language,
+) -> PopupMenu {
+    let rename_id = id.to_owned();
+    let rename_title = title.to_owned();
+    let rename_browser = browser.clone();
+    let delete_id = id.to_owned();
+    let delete_browser = browser.clone();
+    menu.item(
+        PopupMenuItem::new(language.rename_bookmark())
+            .icon(Icon::new(AppIcon::Rename))
+            .on_click(move |_, window, cx| {
+                rename_browser.update(cx, |this, cx| {
+                    this.begin_rename_bookmark(rename_id.clone(), rename_title.clone(), window, cx);
+                });
+            }),
+    )
+    .item(
+        PopupMenuItem::new(language.remove_bookmark())
+            .icon(Icon::new(AppIcon::Delete))
+            .on_click(move |_, _, cx| {
+                delete_browser.update(cx, |this, cx| {
+                    this.delete_bookmark(&delete_id, cx);
+                });
+            }),
+    )
+}
+
 fn populate_bookmark_folder_menu(
     menu: PopupMenu,
     folder: &Bookmark,
@@ -1404,15 +1483,17 @@ fn populate_bookmark_folder_menu(
         .unwrap_or_default();
     let folder_id = folder.id.clone();
     let folder_browser = browser.clone();
-    let mut menu = menu.item(
-        PopupMenuItem::new(language.new_bookmark_folder())
-            .icon(Icon::new(IconName::Folder))
-            .on_click(move |_, window, cx| {
-                folder_browser.update(cx, |this, cx| {
-                    this.begin_create_bookmark_folder(Some(folder_id.clone()), window, cx);
-                });
-            }),
-    );
+    let mut menu = bookmark_context_menu(menu, &folder.id, &folder.title, browser, language)
+        .item(PopupMenuItem::separator())
+        .item(
+            PopupMenuItem::new(language.new_bookmark_folder())
+                .icon(Icon::new(IconName::Folder))
+                .on_click(move |_, window, cx| {
+                    folder_browser.update(cx, |this, cx| {
+                        this.begin_create_bookmark_folder(Some(folder_id.clone()), window, cx);
+                    });
+                }),
+        );
     if children.is_empty() {
         return menu.item(PopupMenuItem::label(language.empty_folder()));
     }

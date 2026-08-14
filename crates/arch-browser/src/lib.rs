@@ -134,6 +134,14 @@ impl BrowserCore {
         Ok(self.store.bookmarks(space_id, parent_id)?)
     }
 
+    /// Renames a bookmark or folder.
+    ///
+    /// # Errors
+    /// Returns an error when the title is empty or the database update fails.
+    pub fn rename_bookmark(&self, id: &str, title: &str) -> Result<bool> {
+        Ok(self.store.rename_bookmark(id, title)?)
+    }
+
     /// Deletes a bookmark or folder subtree.
     ///
     /// # Errors
@@ -597,6 +605,7 @@ mod tests {
         let bookmark = core
             .create_bookmark(&space.id, Some(&nested.id), "Example", &url)
             .unwrap();
+        assert!(core.rename_bookmark(&bookmark.id, "Example Docs").unwrap());
 
         let root = core.bookmarks(&space.id, None).unwrap();
         assert_eq!(root, vec![folder.clone()]);
@@ -608,10 +617,11 @@ mod tests {
         assert_eq!(nested.parent_id.as_deref(), Some(folder.id.as_str()));
 
         let children = core.bookmarks(&space.id, Some(&nested.id)).unwrap();
-        assert_eq!(children, vec![bookmark.clone()]);
-        assert_eq!(bookmark.kind, arch_store::BookmarkKind::Bookmark);
-        assert_eq!(bookmark.parent_id.as_deref(), Some(nested.id.as_str()));
-        assert_eq!(bookmark.url.as_deref(), Some(url.as_str()));
+        assert_eq!(children.len(), 1);
+        assert_eq!(children[0].title, "Example Docs");
+        assert_eq!(children[0].kind, arch_store::BookmarkKind::Bookmark);
+        assert_eq!(children[0].parent_id.as_deref(), Some(nested.id.as_str()));
+        assert_eq!(children[0].url.as_deref(), Some(url.as_str()));
     }
 
     #[test]
