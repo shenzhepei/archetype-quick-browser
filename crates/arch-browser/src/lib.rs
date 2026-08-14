@@ -111,6 +111,21 @@ impl BrowserCore {
             .create_bookmark(space_id, parent_id, title, url.as_str())?)
     }
 
+    /// Creates a bookmark folder in a Space folder or root.
+    ///
+    /// # Errors
+    /// Returns an error when the folder data or database transaction is invalid.
+    pub fn create_bookmark_folder(
+        &mut self,
+        space_id: &str,
+        parent_id: Option<&str>,
+        title: &str,
+    ) -> Result<Bookmark> {
+        Ok(self
+            .store
+            .create_bookmark_folder(space_id, parent_id, title)?)
+    }
+
     /// Lists direct bookmark children in a Space folder or root.
     ///
     /// # Errors
@@ -567,6 +582,30 @@ mod tests {
     use std::fs;
 
     use super::*;
+
+    #[test]
+    fn application_core_persists_bookmarks_in_folder() {
+        let mut core = BrowserCore::in_memory().unwrap();
+        let space = core.create_space("Research").unwrap();
+        let folder = core
+            .create_bookmark_folder(&space.id, None, "References")
+            .unwrap();
+        let url = Url::parse("https://example.com/reference").unwrap();
+        let bookmark = core
+            .create_bookmark(&space.id, Some(&folder.id), "Example", &url)
+            .unwrap();
+
+        let root = core.bookmarks(&space.id, None).unwrap();
+        assert_eq!(root, vec![folder.clone()]);
+        assert_eq!(folder.kind, arch_store::BookmarkKind::Folder);
+        assert_eq!(folder.parent_id, None);
+
+        let children = core.bookmarks(&space.id, Some(&folder.id)).unwrap();
+        assert_eq!(children, vec![bookmark.clone()]);
+        assert_eq!(bookmark.kind, arch_store::BookmarkKind::Bookmark);
+        assert_eq!(bookmark.parent_id.as_deref(), Some(folder.id.as_str()));
+        assert_eq!(bookmark.url.as_deref(), Some(url.as_str()));
+    }
 
     #[test]
     fn fixture_runs_through_display_list() {

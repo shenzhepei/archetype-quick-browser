@@ -143,8 +143,35 @@ impl Language {
         self.select("书签", "Bookmarks")
     }
 
+    pub(crate) const fn bookmark_bar(self) -> &'static str {
+        self.select("书签栏", "Bookmarks bar")
+    }
+
     pub(crate) const fn bookmark_folder(self) -> &'static str {
         self.select("书签文件夹", "Bookmark folder")
+    }
+
+    pub(crate) const fn new_bookmark_folder(self) -> &'static str {
+        self.select("新建书签文件夹", "New bookmark folder")
+    }
+
+    pub(crate) const fn folder_name_placeholder(self) -> &'static str {
+        self.select("文件夹名称", "Folder name")
+    }
+
+    pub(crate) const fn folder_name_empty(self) -> &'static str {
+        self.select("文件夹名称不能为空", "Folder name cannot be empty")
+    }
+
+    pub(crate) const fn empty_folder(self) -> &'static str {
+        self.select("空文件夹", "Empty folder")
+    }
+
+    pub(crate) fn new_folder_name(self, number: usize) -> String {
+        match self {
+            Self::Chinese => format!("文件夹 {number}"),
+            Self::English => format!("Folder {number}"),
+        }
     }
 
     pub(crate) const fn open_page_to_begin(self) -> &'static str {
