@@ -131,16 +131,28 @@ impl Language {
         self.select("前往", "Go")
     }
 
+    pub(crate) const fn bookmark_current_page(self) -> &'static str {
+        self.select("收藏当前页面", "Bookmark this page")
+    }
+
+    pub(crate) const fn remove_bookmark(self) -> &'static str {
+        self.select("删除书签", "Remove bookmark")
+    }
+
+    pub(crate) const fn bookmarks(self) -> &'static str {
+        self.select("书签", "Bookmarks")
+    }
+
+    pub(crate) const fn bookmark_folder(self) -> &'static str {
+        self.select("书签文件夹", "Bookmark folder")
+    }
+
     pub(crate) const fn open_page_to_begin(self) -> &'static str {
         self.select("打开一个页面以开始浏览", "Open a page to begin")
     }
 
     pub(crate) const fn diagnostics(self) -> &'static str {
         self.select("诊断信息", "Diagnostics")
-    }
-
-    pub(crate) const fn developer_preview(self) -> &'static str {
-        self.select("V3 开发者预览版", "V3 Developer Preview")
     }
 
     pub(crate) const fn address_empty(self) -> &'static str {

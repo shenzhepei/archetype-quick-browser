@@ -1,7 +1,8 @@
 # Archetype Quick Browser
 
 Archetype V3 is a developer-preview browser for static HTML documents. The current implementation
-provides a GPUI/gpui-component desktop shell, persistent global tabs and compact Spaces, navigation history, constrained
+provides a GPUI/gpui-component desktop shell, title-bar tabs, compact Spaces, per-Space bookmarks,
+navigation history, constrained
 local and HTTP(S) loading, HTML/CSS processing, basic layout, and PNG/JPEG display.
 
 ## Run
@@ -34,12 +35,13 @@ The scoped product requirements and detailed implementation plan are in:
 
 ## Current Coverage
 
-- Implemented: workspace and CI; desktop shell with top tabs and compact Space switching; DOM and HTML parsing; initial CSS parser/cascade;
+- Implemented: workspace and CI; desktop shell with title-bar tabs, compact Space switching, and
+  per-Space root bookmarks; DOM and HTML parsing; initial CSS parser/cascade;
   recursive block boxes and inline text runs; serializable display lists with positioned text,
   images, backgrounds, and borders; text color, weight, style, alignment, line height, and
   white-space rendering; constrained document, stylesheet, PNG, and JPEG loading with image
   fallbacks; classified error pages; SQLite Space/Page persistence with corrupt-profile recovery;
-  global tab persistence, Space-independent bookmark schema foundation, navigation identity,
+  global tab persistence, hierarchical Space bookmark storage and root bookmark bar, navigation identity,
   redirects, links, and history; deterministic fixtures with a corpus-wide
   render test.
 - Remaining: complete the CSS/layout support matrix, grow the corpus to 30 fixtures, improve font

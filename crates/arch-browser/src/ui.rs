@@ -3,7 +3,7 @@ use std::{borrow::Cow, path::PathBuf};
 use arch_browser::{BrowserCore, RenderedPage};
 use arch_net::{LoadError, LoadErrorKind};
 use arch_paint::{DisplayCommand, PaintColor};
-use arch_store::{Page, Space};
+use arch_store::{Bookmark, BookmarkKind, Page, Space};
 use arch_style::{FontStyle as PageFontStyle, FontWeight as PageFontWeight, TextAlign};
 use directories::ProjectDirs;
 use gpui::{
@@ -54,6 +54,9 @@ impl AssetSource for Assets {
             "archetype-icons/alert-line.svg" => Some(include_bytes!(
                 "../../../assets/icons/system/alert-line.svg"
             )),
+            "archetype-icons/star-line.svg" => {
+                Some(include_bytes!("../../../assets/icons/system/star-line.svg"))
+            }
             _ => None,
         };
         if let Some(bytes) = bytes {
@@ -76,6 +79,7 @@ impl AssetSource for Assets {
                     "archetype-icons/delete-bin-line.svg",
                     "archetype-icons/find-replace-line.svg",
                     "archetype-icons/alert-line.svg",
+                    "archetype-icons/star-line.svg",
                 ]
                 .into_iter()
                 .map(Into::into),
@@ -95,6 +99,7 @@ enum AppIcon {
     Delete,
     Rename,
     Alert,
+    Star,
 }
 
 impl IconNamed for AppIcon {
@@ -108,6 +113,7 @@ impl IconNamed for AppIcon {
             Self::Delete => "archetype-icons/delete-bin-line.svg",
             Self::Rename => "archetype-icons/find-replace-line.svg",
             Self::Alert => "archetype-icons/alert-line.svg",
+            Self::Star => "archetype-icons/star-line.svg",
         }
         .into()
     }
@@ -182,6 +188,7 @@ struct QuickBrowser {
     language: Language,
     core: BrowserCore,
     spaces: Vec<Space>,
+    bookmarks: Vec<Bookmark>,
     pages: Vec<Page>,
     selected_space: Option<String>,
     selected_page: Option<String>,
@@ -212,6 +219,10 @@ impl QuickBrowser {
             .0
             .filter(|id| spaces.iter().any(|space| &space.id == id))
             .or_else(|| spaces.first().map(|space| space.id.clone()));
+        let bookmarks = selected_space
+            .as_deref()
+            .and_then(|id| core.bookmarks(id, None).ok())
+            .unwrap_or_default();
         let pages = core.pages().unwrap_or_default();
         let selected_page = saved
             .1
@@ -252,6 +263,7 @@ impl QuickBrowser {
             language,
             core,
             spaces,
+            bookmarks,
             pages,
             selected_space,
             selected_page,
@@ -291,6 +303,7 @@ impl QuickBrowser {
             Ok(space) => {
                 self.selected_space = Some(space.id.clone());
                 self.spaces.push(space);
+                self.bookmarks.clear();
                 self.renaming_space = false;
                 self.set_space_name(name, window, cx);
                 self.persist_selection();
@@ -309,6 +322,7 @@ impl QuickBrowser {
             .find(|space| space.id == id)
             .map(|space| space.name.clone())
             .unwrap_or_default();
+        self.bookmarks = self.core.bookmarks(id, None).unwrap_or_default();
         self.set_space_name(name, window, cx);
         self.persist_selection();
         cx.notify();
@@ -378,6 +392,11 @@ impl QuickBrowser {
                     .as_deref()
                     .and_then(|space_id| self.spaces.iter().find(|space| space.id == space_id))
                     .map(|space| space.name.clone())
+                    .unwrap_or_default();
+                self.bookmarks = self
+                    .selected_space
+                    .as_deref()
+                    .and_then(|space_id| self.core.bookmarks(space_id, None).ok())
                     .unwrap_or_default();
                 self.set_space_name(name, window, cx);
                 self.persist_selection();
@@ -528,6 +547,51 @@ impl QuickBrowser {
         self.pages.iter().find(|page| page.id == id)
     }
 
+    fn bookmark_current_page(&mut self, cx: &mut Context<Self>) {
+        self.error = None;
+        let Some(space_id) = self.selected_space.clone() else {
+            return;
+        };
+        let Some(page) = self.selected_page_record().cloned() else {
+            return;
+        };
+        let Ok(url) = Url::parse(&page.url) else {
+            return;
+        };
+        let title = if page.title.is_empty() {
+            page.url.clone()
+        } else {
+            page.title
+        };
+        match self.core.create_bookmark(&space_id, None, &title, &url) {
+            Ok(bookmark) => self.bookmarks.push(bookmark),
+            Err(error) => self.error = Some(ErrorView::application(self.language, &error)),
+        }
+        cx.notify();
+    }
+
+    fn open_bookmark(&mut self, url: &str, window: &mut Window, cx: &mut Context<Self>) {
+        match Url::parse(url) {
+            Ok(url) => self.navigate_to(&url, window, cx),
+            Err(error) => {
+                self.error = Some(ErrorView::input(
+                    self.language,
+                    self.language.invalid_url(error),
+                ));
+                cx.notify();
+            }
+        }
+    }
+
+    fn delete_bookmark(&mut self, id: &str, cx: &mut Context<Self>) {
+        match self.core.delete_bookmark(id) {
+            Ok(true) => self.bookmarks.retain(|bookmark| bookmark.id != id),
+            Ok(false) => {}
+            Err(error) => self.error = Some(ErrorView::application(self.language, &error)),
+        }
+        cx.notify();
+    }
+
     fn persist_selection(&mut self) {
         if let Err(error) = self.core.save_selection(
             self.selected_space.as_deref(),
@@ -649,7 +713,7 @@ impl QuickBrowser {
             };
             h_flex()
                 .id(SharedString::from(format!("tab-{}", page.id)))
-                .h(px(36.0))
+                .h(px(28.0))
                 .min_w(px(72.0))
                 .max_w(px(220.0))
                 .flex_1()
@@ -696,14 +760,11 @@ impl QuickBrowser {
         });
 
         h_flex()
-            .h(px(42.0))
-            .w_full()
-            .px_2()
-            .pt_1()
+            .h_full()
+            .flex_1()
+            .min_w_0()
+            .px_1()
             .gap_1()
-            .border_b_1()
-            .border_color(cx.theme().border)
-            .bg(cx.theme().tab_bar)
             .child(
                 h_flex()
                     .id("tab-list")
@@ -717,12 +778,84 @@ impl QuickBrowser {
                 Button::new("new-tab")
                     .ghost()
                     .icon(AppIcon::Add)
-                    .small()
+                    .xsmall()
                     .tooltip(self.language.new_tab())
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.add_page(window, cx);
                     })),
             )
+            .into_any_element()
+    }
+
+    fn bookmark_bar(&self, cx: &mut Context<Self>) -> AnyElement {
+        let bookmarks = self.bookmarks.iter().map(|bookmark| {
+            let delete_id = bookmark.id.clone();
+            match (&bookmark.kind, &bookmark.url) {
+                (BookmarkKind::Bookmark, Some(url)) => {
+                    let target = url.clone();
+                    h_flex()
+                        .flex_shrink_0()
+                        .gap_0p5()
+                        .child(
+                            Button::new(SharedString::from(format!("bookmark-{}", bookmark.id)))
+                                .ghost()
+                                .xsmall()
+                                .label(bookmark.title.clone())
+                                .on_click(cx.listener(move |this, _, window, cx| {
+                                    this.open_bookmark(&target, window, cx);
+                                })),
+                        )
+                        .child(
+                            Button::new(SharedString::from(format!(
+                                "delete-bookmark-{}",
+                                bookmark.id
+                            )))
+                            .ghost()
+                            .xsmall()
+                            .icon(AppIcon::Close)
+                            .tooltip(self.language.remove_bookmark())
+                            .on_click(cx.listener(
+                                move |this, _, _, cx| {
+                                    this.delete_bookmark(&delete_id, cx);
+                                },
+                            )),
+                        )
+                        .into_any_element()
+                }
+                (BookmarkKind::Folder, None) => Button::new(SharedString::from(format!(
+                    "bookmark-folder-{}",
+                    bookmark.id
+                )))
+                .ghost()
+                .xsmall()
+                .label(bookmark.title.clone())
+                .dropdown_caret(true)
+                .tooltip(self.language.bookmark_folder())
+                .disabled(true)
+                .into_any_element(),
+                _ => div().into_any_element(),
+            }
+        });
+
+        h_flex()
+            .id("bookmark-bar")
+            .h(px(32.0))
+            .w_full()
+            .px_3()
+            .gap_1()
+            .overflow_x_scroll()
+            .border_b_1()
+            .border_color(cx.theme().border)
+            .bg(cx.theme().background)
+            .when(self.bookmarks.is_empty(), |bar| {
+                bar.child(
+                    div()
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(self.language.bookmarks()),
+                )
+            })
+            .children(bookmarks)
             .into_any_element()
     }
 
@@ -774,6 +907,16 @@ impl QuickBrowser {
                         .appearance(false)
                         .cleanable(true),
                 ),
+            )
+            .child(
+                Button::new("bookmark-current-page")
+                    .ghost()
+                    .icon(AppIcon::Star)
+                    .tooltip(self.language.bookmark_current_page())
+                    .disabled(current.is_none() || self.selected_space.is_none())
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.bookmark_current_page(cx);
+                    })),
             )
             .child(
                 Button::new("navigate")
@@ -968,24 +1111,15 @@ impl Render for QuickBrowser {
             .child(
                 TitleBar::new().child(
                     h_flex()
-                        .w_full()
-                        .justify_between()
-                        .child(
-                            h_flex()
-                                .gap_2()
-                                .child(div().font_semibold().child("Archetype"))
-                                .child(
-                                    div()
-                                        .text_xs()
-                                        .text_color(cx.theme().muted_foreground)
-                                        .child(self.language.developer_preview()),
-                                ),
-                        )
-                        .child(self.space_switcher(cx)),
+                        .size_full()
+                        .min_w_0()
+                        .gap_1()
+                        .child(self.space_switcher(cx))
+                        .child(self.tab_strip(cx)),
                 ),
             )
-            .child(self.tab_strip(cx))
             .child(self.toolbar(cx))
+            .child(self.bookmark_bar(cx))
             .child(
                 div()
                     .flex_1()
