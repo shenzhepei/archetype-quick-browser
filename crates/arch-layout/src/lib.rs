@@ -5,7 +5,8 @@ use std::{
 
 use arch_dom::{Document, NodeId, NodeKind};
 use arch_style::{
-    BoxSizing, ComputedLength, Display, FontStyle, FontWeight, StyledNode, TextAlign, WhiteSpace,
+    BoxSizing, ComputedLength, Display, FontStyle, FontWeight, Overflow, StyledNode, TextAlign,
+    WhiteSpace,
 };
 use serde::{Deserialize, Serialize};
 
@@ -21,6 +22,7 @@ pub struct Rect {
 pub struct LayoutBox {
     pub node_id: NodeId,
     pub bounds: Rect,
+    pub clip: Option<Rect>,
     pub text: Option<String>,
     pub image: Option<ImageBox>,
     pub link: Option<String>,
@@ -161,6 +163,7 @@ impl<S: BuildHasher> LayoutContext<'_, S> {
             self.tree.boxes.push(LayoutBox {
                 node_id: node.id,
                 bounds,
+                clip: None,
                 text,
                 image,
                 link: self.links.get(&node.id).cloned(),
@@ -186,11 +189,26 @@ impl<S: BuildHasher> LayoutContext<'_, S> {
                 box_dimension(style, resolve(value, containing_width))
             });
             self.tree.boxes[box_index].bounds.height = height;
+            self.clip_descendants(box_index, style.overflow, style.border_px);
             *cursor_y = y + height + style.margin.bottom;
         } else {
             for child in &node.children {
                 self.layout_node(*child, containing_x, containing_width, cursor_y);
             }
+        }
+    }
+
+    fn clip_descendants(&mut self, box_index: usize, overflow: Overflow, border_px: f32) {
+        if overflow != Overflow::Hidden {
+            return;
+        }
+        let clip = inset_rect(self.tree.boxes[box_index].bounds, border_px);
+        for descendant in &mut self.tree.boxes[box_index + 1..] {
+            descendant.clip = Some(
+                descendant
+                    .clip
+                    .map_or(clip, |existing| intersect_rect(existing, clip)),
+            );
         }
     }
 
@@ -306,6 +324,7 @@ impl<S: BuildHasher> LayoutContext<'_, S> {
                     width: run_width,
                     height: run_height,
                 },
+                clip: None,
                 text,
                 image,
                 link: self.links.get(&node_id).cloned(),
@@ -351,6 +370,31 @@ fn text_line_count(value: &str, chars_per_line: f32, white_space: WhiteSpace) ->
         })
         .sum::<f32>()
         .max(1.0)
+}
+
+fn intersect_rect(first: Rect, second: Rect) -> Rect {
+    let x = first.x.max(second.x);
+    let y = first.y.max(second.y);
+    let right = (first.x + first.width).min(second.x + second.width);
+    let bottom = (first.y + first.height).min(second.y + second.height);
+    Rect {
+        x,
+        y,
+        width: (right - x).max(0.0),
+        height: (bottom - y).max(0.0),
+    }
+}
+
+fn inset_rect(rect: Rect, inset: f32) -> Rect {
+    let inset = inset.max(0.0);
+    let horizontal = inset.min(rect.width / 2.0);
+    let vertical = inset.min(rect.height / 2.0);
+    Rect {
+        x: rect.x + horizontal,
+        y: rect.y + vertical,
+        width: rect.width - horizontal * 2.0,
+        height: rect.height - vertical * 2.0,
+    }
 }
 
 fn resolve(length: ComputedLength, containing: f32) -> f32 {
@@ -410,6 +454,47 @@ mod tests {
             .find(|item| item.text.as_deref() == Some("family"))
             .unwrap();
         assert_eq!(text.font_family.as_deref(), Some("Helvetica Neue"));
+    }
+
+    #[test]
+    fn intersects_nested_overflow_clips_for_descendants() {
+        let document =
+            parse_html("<section class='outer'><div class='inner'><p>clipped</p></div></section>");
+        let styled = style_document(
+            &document,
+            &parse_css(
+                ".outer { width: 200px; height: 80px; overflow: hidden; padding: 10px; border-width: 2px } \
+                 .inner { width: 180px; height: 120px; overflow: hidden; margin-left: 30px }",
+            ),
+        );
+        let tree = layout(&document, &styled, 800.0, &HashMap::new(), &HashMap::new());
+        let outer = tree
+            .boxes
+            .iter()
+            .find(|item| {
+                document.node(item.node_id).is_some_and(
+                    |node| matches!(&node.kind, NodeKind::Element(element) if element.attribute("class") == Some("outer")),
+                )
+            })
+            .unwrap();
+        let inner = tree
+            .boxes
+            .iter()
+            .find(|item| {
+                document.node(item.node_id).is_some_and(
+                    |node| matches!(&node.kind, NodeKind::Element(element) if element.attribute("class") == Some("inner")),
+                )
+            })
+            .unwrap();
+        let text = tree
+            .boxes
+            .iter()
+            .find(|item| item.text.as_deref() == Some("clipped"))
+            .unwrap();
+        let outer_clip = inset_rect(outer.bounds, outer.border_width_px);
+        assert_eq!(text.clip, Some(intersect_rect(outer_clip, inner.bounds)));
+        assert!((outer_clip.x - outer.bounds.x - 2.0).abs() < f32::EPSILON);
+        assert!(text.bounds.x > outer.bounds.x);
     }
 
     #[test]

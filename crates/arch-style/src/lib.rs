@@ -59,6 +59,13 @@ pub enum TextAlign {
     End,
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub enum Overflow {
+    #[default]
+    Visible,
+    Hidden,
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct EdgeSizes {
     pub top: f32,
@@ -88,6 +95,7 @@ pub struct ComputedStyle {
     pub min_width: Option<ComputedLength>,
     pub max_width: Option<ComputedLength>,
     pub box_sizing: BoxSizing,
+    pub overflow: Overflow,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -389,6 +397,11 @@ fn apply(style: &mut ComputedStyle, declarations: &BTreeMap<&str, CascadeWinner<
                     BoxSizing::ContentBox
                 };
             }
+            "overflow" => match *value {
+                "visible" => style.overflow = Overflow::Visible,
+                "hidden" => style.overflow = Overflow::Hidden,
+                _ => {}
+            },
             "white-space" => {
                 style.white_space = match *value {
                     "pre" => WhiteSpace::Pre,
@@ -597,6 +610,29 @@ mod tests {
         assert_eq!(style.style.min_width, Some(ComputedLength::Px(160.0)));
         assert!((style.style.border_px - 3.0).abs() < f32::EPSILON);
         assert_eq!(style.style.box_sizing, BoxSizing::BorderBox);
+    }
+
+    #[test]
+    fn computes_overflow_without_inheriting_it() {
+        let document = parse_html("<section><div>child</div></section>");
+        let styled = style_document(&document, &parse("section { overflow: hidden }"));
+        let style_for = |name: &str| {
+            let id = document
+                .descendants(document.root())
+                .find(
+                    |node| matches!(&node.kind, NodeKind::Element(element) if element.name == name),
+                )
+                .unwrap()
+                .id;
+            styled
+                .iter()
+                .find(|node| node.node_id == id)
+                .unwrap()
+                .style
+                .overflow
+        };
+        assert_eq!(style_for("section"), Overflow::Hidden);
+        assert_eq!(style_for("div"), Overflow::Visible);
     }
 
     #[test]

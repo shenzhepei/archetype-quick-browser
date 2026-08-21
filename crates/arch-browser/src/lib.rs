@@ -814,6 +814,40 @@ mod tests {
     }
 
     #[test]
+    fn overflow_fixture_clips_descendant_commands() {
+        let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../fixtures/pages/11-overflow-hidden/index.html")
+            .canonicalize()
+            .unwrap();
+        let page = render_url(
+            &Loader::default(),
+            &Url::from_file_path(fixture).unwrap(),
+            1280.0,
+        )
+        .unwrap();
+        assert!(page.display_list.commands.iter().any(|command| {
+            matches!(
+                command,
+                arch_paint::DisplayCommand::Box {
+                    clip: Some(clip),
+                    bounds,
+                    ..
+                } if bounds.y + bounds.height > clip.y + clip.height
+            )
+        }));
+        assert!(page.display_list.commands.iter().any(|command| {
+            matches!(
+                command,
+                arch_paint::DisplayCommand::Text {
+                    content,
+                    clip: Some(_),
+                    ..
+                } if content.contains("Nested clipping")
+            )
+        }));
+    }
+
+    #[test]
     fn jpeg_loads_while_missing_image_keeps_alt_fallback() {
         let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../fixtures/pages/09-image-formats/index.html")

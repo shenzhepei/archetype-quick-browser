@@ -265,6 +265,7 @@ fn supported_property(name: &str) -> bool {
             | "min-width"
             | "max-width"
             | "box-sizing"
+            | "overflow"
     )
 }
 
@@ -335,5 +336,13 @@ mod tests {
         assert_eq!(first_font_family("var(--font), sans-serif"), None);
         assert_eq!(first_font_family(r#""Helvetica" Neue, sans-serif"#), None);
         assert_eq!(first_font_family("  "), None);
+    }
+
+    #[test]
+    fn accepts_overflow_declarations() {
+        let sheet = parse("section { overflow: hidden }");
+        assert_eq!(sheet.rules[0].declarations[0].name, "overflow");
+        assert_eq!(sheet.rules[0].declarations[0].value, "hidden");
+        assert!(sheet.diagnostics.is_empty());
     }
 }

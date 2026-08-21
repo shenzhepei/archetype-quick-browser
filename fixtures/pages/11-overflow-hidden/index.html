@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Overflow hidden fixture</title>
+    <style>
+      .viewport {
+        width: 320px;
+        height: 96px;
+        overflow: hidden;
+        border-width: 2px;
+        border-color: #2457c5;
+      }
+      .content { width: 280px; height: 180px; margin: 24px; background-color: #dbeafe; }
+      .nested {
+        width: 260px;
+        height: 48px;
+        overflow: hidden;
+        margin: 16px;
+        background-color: #dcfce7;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Overflow clipping</h1>
+    <section class="viewport">
+      <div class="content">
+        <p>Content outside the fixed viewport is clipped.</p>
+        <div class="nested"><p>Nested clipping intersects with its parent.</p></div>
+      </div>
+    </section>
+  </body>
+</html>

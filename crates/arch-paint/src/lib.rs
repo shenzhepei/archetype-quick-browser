@@ -6,12 +6,14 @@ use serde::{Deserialize, Serialize};
 pub enum DisplayCommand {
     Box {
         bounds: Rect,
+        clip: Option<Rect>,
         background: Option<PaintColor>,
         border: Option<PaintColor>,
         border_width_px: f32,
     },
     Text {
         bounds: Rect,
+        clip: Option<Rect>,
         content: String,
         size_px: f32,
         font_family: Option<String>,
@@ -25,6 +27,7 @@ pub enum DisplayCommand {
     },
     Image {
         bounds: Rect,
+        clip: Option<Rect>,
         source: String,
         alt: String,
         intrinsic_width: u32,
@@ -59,6 +62,7 @@ pub fn paint(tree: &LayoutTree) -> DisplayList {
                 let box_command = (background.is_some() || item.border_width_px > 0.0).then_some(
                     DisplayCommand::Box {
                         bounds: item.bounds,
+                        clip: item.clip,
                         background,
                         border,
                         border_width_px: item.border_width_px,
@@ -66,6 +70,7 @@ pub fn paint(tree: &LayoutTree) -> DisplayList {
                 );
                 let text = item.text.as_ref().map(|content| DisplayCommand::Text {
                     bounds: item.bounds,
+                    clip: item.clip,
                     content: content.clone(),
                     size_px: item.font_size_px,
                     font_family: item.font_family.clone(),
@@ -79,6 +84,7 @@ pub fn paint(tree: &LayoutTree) -> DisplayList {
                 });
                 let image = item.image.as_ref().map(|image| DisplayCommand::Image {
                     bounds: item.bounds,
+                    clip: item.clip,
                     source: image.source.clone(),
                     alt: image.alt.clone(),
                     intrinsic_width: image.intrinsic_width,
@@ -141,6 +147,12 @@ mod tests {
             boxes: vec![LayoutBox {
                 node_id: NodeId(1),
                 bounds: Rect::default(),
+                clip: Some(Rect {
+                    x: 1.0,
+                    y: 2.0,
+                    width: 3.0,
+                    height: 4.0,
+                }),
                 text: Some("large".to_owned()),
                 image: None,
                 link: None,
@@ -168,6 +180,10 @@ mod tests {
             [DisplayCommand::Box { .. }, DisplayCommand::Text { font_family: Some(family), .. }]
                 if family == "Helvetica Neue"
         ));
+        assert!(paint(&tree).commands.iter().all(|command| matches!(
+            command,
+            DisplayCommand::Box { clip: Some(_), .. } | DisplayCommand::Text { clip: Some(_), .. }
+        )));
         assert!(matches!(
             paint(&tree).commands.as_slice(),
             [

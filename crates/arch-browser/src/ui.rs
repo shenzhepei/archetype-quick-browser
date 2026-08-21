@@ -1248,12 +1248,13 @@ impl QuickBrowser {
     }
 
     fn display_command(command: &DisplayCommand, cx: &mut Context<Self>) -> AnyElement {
-        let bounds = match command {
-            DisplayCommand::Box { bounds, .. }
-            | DisplayCommand::Text { bounds, .. }
-            | DisplayCommand::Image { bounds, .. } => *bounds,
+        let (bounds, clip) = match command {
+            DisplayCommand::Box { bounds, clip, .. }
+            | DisplayCommand::Text { bounds, clip, .. }
+            | DisplayCommand::Image { bounds, clip, .. } => (*bounds, *clip),
         };
-        match command {
+        let (x, y) = relative_position(bounds, clip);
+        let element = match command {
             DisplayCommand::Box {
                 background,
                 border,
@@ -1261,8 +1262,8 @@ impl QuickBrowser {
                 ..
             } => div()
                 .absolute()
-                .left(px(bounds.x))
-                .top(px(bounds.y))
+                .left(px(x))
+                .top(px(y))
                 .w(px(bounds.width))
                 .h(px(bounds.height))
                 .when_some(*background, |layer, color| layer.bg(gpui_color(color)))
@@ -1286,8 +1287,8 @@ impl QuickBrowser {
             } => {
                 let text = div()
                     .absolute()
-                    .left(px(bounds.x))
-                    .top(px(bounds.y))
+                    .left(px(x))
+                    .top(px(y))
                     .w(px(bounds.width))
                     .h(px(bounds.height))
                     .text_size(px(*size_px))
@@ -1327,16 +1328,16 @@ impl QuickBrowser {
                 if *loaded {
                     img(image_source(source))
                         .absolute()
-                        .left(px(bounds.x))
-                        .top(px(bounds.y))
+                        .left(px(x))
+                        .top(px(y))
                         .w(px(bounds.width))
                         .h(px(bounds.height))
                         .into_any_element()
                 } else {
                     div()
                         .absolute()
-                        .left(px(bounds.x))
-                        .top(px(bounds.y))
+                        .left(px(x))
+                        .top(px(y))
                         .w(px(bounds.width))
                         .h(px(bounds.height))
                         .text_sm()
@@ -1345,8 +1346,31 @@ impl QuickBrowser {
                         .into_any_element()
                 }
             }
-        }
+        };
+        clipped_element(element, clip)
     }
+}
+
+fn clipped_element(element: AnyElement, clip: Option<arch_layout::Rect>) -> AnyElement {
+    if let Some(clip) = clip {
+        div()
+            .absolute()
+            .left(px(clip.x))
+            .top(px(clip.y))
+            .w(px(clip.width))
+            .h(px(clip.height))
+            .overflow_hidden()
+            .child(element)
+            .into_any_element()
+    } else {
+        element
+    }
+}
+
+fn relative_position(bounds: arch_layout::Rect, clip: Option<arch_layout::Rect>) -> (f32, f32) {
+    clip.map_or((bounds.x, bounds.y), |clip| {
+        (bounds.x - clip.x, bounds.y - clip.y)
+    })
 }
 
 impl Render for QuickBrowser {
