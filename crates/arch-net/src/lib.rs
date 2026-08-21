@@ -165,7 +165,7 @@ mod tests {
     fn rejects_file_over_custom_limit() {
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/lib.rs");
         let url = Url::from_file_path(path).unwrap();
-        let error = Loader::default().load_with_limit(&url, 1);
+        let error = Loader::load_file(&url, 1);
         assert!(matches!(
             error,
             Err(LoadError::ResourceTooLarge { limit: 1 })
