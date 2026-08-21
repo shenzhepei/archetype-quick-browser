@@ -1638,6 +1638,31 @@ mod tests {
     use super::*;
 
     #[test]
+    fn clipping_helpers_preserve_global_and_relative_positions() {
+        let bounds = arch_layout::Rect {
+            x: 40.0,
+            y: 30.0,
+            width: 80.0,
+            height: 20.0,
+        };
+        let clip = arch_layout::Rect {
+            x: 10.0,
+            y: 5.0,
+            width: 60.0,
+            height: 15.0,
+        };
+        let global = relative_position(bounds, None);
+        assert!((global.0 - 40.0).abs() < f32::EPSILON);
+        assert!((global.1 - 30.0).abs() < f32::EPSILON);
+        let relative = relative_position(bounds, Some(clip));
+        assert!((relative.0 - 30.0).abs() < f32::EPSILON);
+        assert!((relative.1 - 25.0).abs() < f32::EPSILON);
+
+        let _unclipped = clipped_element(div().into_any_element(), None);
+        let _clipped = clipped_element(div().into_any_element(), Some(clip));
+    }
+
+    #[test]
     fn address_parser_adds_https_to_hostnames() {
         assert_eq!(
             parse_address("baidu.com", Language::English)
