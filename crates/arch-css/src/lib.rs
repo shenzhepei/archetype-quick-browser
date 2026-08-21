@@ -258,6 +258,7 @@ fn supported_property(name: &str) -> bool {
             | "padding-right"
             | "padding-bottom"
             | "padding-left"
+            | "border"
             | "border-width"
             | "border-color"
             | "width"
@@ -343,6 +344,14 @@ mod tests {
         let sheet = parse("section { overflow: hidden }");
         assert_eq!(sheet.rules[0].declarations[0].name, "overflow");
         assert_eq!(sheet.rules[0].declarations[0].value, "hidden");
+        assert!(sheet.diagnostics.is_empty());
+    }
+
+    #[test]
+    fn accepts_border_shorthand() {
+        let sheet = parse("section { border: 3px solid #2457c5 }");
+        assert_eq!(sheet.rules[0].declarations[0].name, "border");
+        assert_eq!(sheet.rules[0].declarations[0].value, "3px solid #2457c5");
         assert!(sheet.diagnostics.is_empty());
     }
 }

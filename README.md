@@ -91,7 +91,7 @@ The scoped product requirements and detailed implementation plans are in:
   white-space, and overflow clipping; constrained document, stylesheet, PNG, and JPEG loading with
   image fallbacks; classified error pages; SQLite Space/Page persistence with corrupt-profile recovery;
   global tab persistence, hierarchical Space bookmark storage and root bookmark bar, navigation identity,
-  redirects, links, and history; deterministic fixtures with a corpus-wide
+  redirects, links, and history; 12 of the planned 30 deterministic fixtures with a corpus-wide
   render test.
 - Remaining: complete the CSS/layout support matrix, grow the corpus to 30 fixtures, improve font
   shaping and link interaction, add screenshot regression and fuzzing, record performance

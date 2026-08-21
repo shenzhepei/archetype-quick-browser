@@ -5,7 +5,7 @@ use arch_dom::{Document, ElementData, NodeId, NodeKind};
 use serde::{Deserialize, Serialize};
 
 type Specificity = (u16, u16, u16);
-type CascadeWinner<'a> = (bool, Specificity, usize, &'a str);
+type CascadeWinner<'a> = (bool, Specificity, usize, usize, &'a str);
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub enum Display {
@@ -116,11 +116,12 @@ pub fn style_document(document: &Document, stylesheet: &Stylesheet) -> Vec<Style
             for rule in &stylesheet.rules {
                 if selector_matches(document, node.id, &rule.selector) {
                     let specificity = specificity(&rule.selector);
-                    for declaration in &rule.declarations {
+                    for (declaration_order, declaration) in rule.declarations.iter().enumerate() {
                         let candidate = (
                             declaration.important,
                             specificity,
                             rule.source_order,
+                            declaration_order,
                             declaration.value.as_str(),
                         );
                         if winners
@@ -335,17 +336,24 @@ fn specificity(selector: &str) -> Specificity {
 }
 
 fn apply(style: &mut ComputedStyle, declarations: &BTreeMap<&str, CascadeWinner<'_>>) {
-    if let Some((_, _, _, value)) = declarations.get("font-size") {
+    if let Some((_, _, _, _, value)) = declarations.get("font-size") {
         style.font_size_px =
             absolute_length(value, style.font_size_px).unwrap_or(style.font_size_px);
         style.line_height_px = style.font_size_px * 1.4;
     }
-    if let Some((_, _, _, value)) = declarations.get("line-height") {
+    if let Some((_, _, _, _, value)) = declarations.get("line-height") {
         style.line_height_px =
             parse_line_height(value, style.font_size_px).unwrap_or(style.line_height_px);
     }
-    for (name, (_, _, _, value)) in declarations {
-        if matches!(*name, "font-size" | "line-height") {
+    if let Some((_, _, _, _, value)) = declarations.get("color") {
+        style.color = Some((*value).to_owned());
+    }
+    apply_border(style, declarations);
+    for (name, (_, _, _, _, value)) in declarations {
+        if matches!(
+            *name,
+            "font-size" | "line-height" | "color" | "border" | "border-width" | "border-color"
+        ) {
             continue;
         }
         match *name {
@@ -356,9 +364,7 @@ fn apply(style: &mut ComputedStyle, declarations: &BTreeMap<&str, CascadeWinner<
                     _ => Display::Inline,
                 };
             }
-            "color" => style.color = Some((*value).to_owned()),
             "background-color" => style.background_color = Some((*value).to_owned()),
-            "border-color" => style.border_color = Some((*value).to_owned()),
             "font-family" => {
                 if let Some(family) = arch_css::first_font_family(value) {
                     style.font_family = Some(family);
@@ -382,10 +388,6 @@ fn apply(style: &mut ComputedStyle, declarations: &BTreeMap<&str, CascadeWinner<
             "padding-right" => set_edge(&mut style.padding.right, value, style.font_size_px),
             "padding-bottom" => set_edge(&mut style.padding.bottom, value, style.font_size_px),
             "padding-left" => set_edge(&mut style.padding.left, value, style.font_size_px),
-            "border-width" => {
-                style.border_px =
-                    absolute_length(value, style.font_size_px).unwrap_or(style.border_px);
-            }
             "width" => style.width = length(value, style.font_size_px),
             "height" => style.height = length(value, style.font_size_px),
             "min-width" => style.min_width = length(value, style.font_size_px),
@@ -434,6 +436,99 @@ fn apply(style: &mut ComputedStyle, declarations: &BTreeMap<&str, CascadeWinner<
             _ => {}
         }
     }
+}
+
+fn apply_border(style: &mut ComputedStyle, declarations: &BTreeMap<&str, CascadeWinner<'_>>) {
+    let shorthand = declarations.get("border").and_then(|winner| {
+        parse_border(winner.4, style.font_size_px).map(|border| (winner, border))
+    });
+    let width = declarations.get("border-width");
+    if let Some((winner, border)) = shorthand.as_ref()
+        && width.is_none_or(|width| cascade_rank(winner) > cascade_rank(width))
+    {
+        style.border_px = border.width_px;
+    }
+    if let Some(width) = width
+        && shorthand
+            .as_ref()
+            .is_none_or(|(winner, _)| cascade_rank(width) > cascade_rank(winner))
+    {
+        style.border_px = absolute_length(width.4, style.font_size_px).unwrap_or(style.border_px);
+    }
+
+    let color = declarations.get("border-color");
+    if let Some((winner, border)) = shorthand.as_ref()
+        && color.is_none_or(|color| cascade_rank(winner) > cascade_rank(color))
+    {
+        style.border_color = border
+            .color
+            .clone()
+            .or_else(|| style.color.clone())
+            .or_else(|| Some("black".to_owned()));
+    }
+    if let Some(color) = color
+        && shorthand
+            .as_ref()
+            .is_none_or(|(winner, _)| cascade_rank(color) > cascade_rank(winner))
+    {
+        style.border_color = Some(color.4.to_owned());
+    }
+}
+
+fn cascade_rank(winner: &CascadeWinner<'_>) -> (bool, Specificity, usize, usize) {
+    (winner.0, winner.1, winner.2, winner.3)
+}
+
+struct ParsedBorder {
+    width_px: f32,
+    color: Option<String>,
+}
+
+fn parse_border(value: &str, em_px: f32) -> Option<ParsedBorder> {
+    if value.trim() == "none" {
+        return Some(ParsedBorder {
+            width_px: 0.0,
+            color: None,
+        });
+    }
+    let mut width_px = None;
+    let mut solid = false;
+    let mut color = None;
+    for part in value.split_whitespace() {
+        if part == "solid" {
+            if solid {
+                return None;
+            }
+            solid = true;
+        } else if matches!(
+            part,
+            "none"
+                | "hidden"
+                | "dotted"
+                | "dashed"
+                | "double"
+                | "groove"
+                | "ridge"
+                | "inset"
+                | "outset"
+        ) {
+            return None;
+        } else if width_px.is_none() {
+            width_px = absolute_length(part, em_px).filter(|width| *width >= 0.0);
+            if width_px.is_none() {
+                if color.is_some() {
+                    return None;
+                }
+                color = Some(part.to_owned());
+            }
+        } else if color.is_none() {
+            color = Some(part.to_owned());
+        } else {
+            return None;
+        }
+    }
+    let width_px = width_px.unwrap_or(3.0);
+    (solid || width_px == 0.0).then_some(ParsedBorder { width_px, color })
 }
 
 fn set_edge(edge: &mut f32, value: &str, em_px: f32) {
@@ -610,6 +705,51 @@ mod tests {
         assert_eq!(style.style.min_width, Some(ComputedLength::Px(160.0)));
         assert!((style.style.border_px - 3.0).abs() < f32::EPSILON);
         assert_eq!(style.style.box_sizing, BoxSizing::BorderBox);
+    }
+
+    #[test]
+    fn border_shorthand_respects_declaration_order_and_none() {
+        let document = parse_html(
+            "<div id='shorthand'></div><div id='longhand'></div><div id='none'></div><div id='current'></div>",
+        );
+        let styled = style_document(
+            &document,
+            &parse(
+                "#shorthand { border-width: 1px; border-color: blue; border: 4px solid #123456 } \
+                 #longhand { border: 4px solid #123456; border-width: 2px; border-color: red } \
+                 #none { border: 4px solid blue; border: none } \
+                 #current { color: green; border: 2px solid }",
+            ),
+        );
+        let style_for = |id: &str| {
+            let node_id = document
+                .descendants(document.root())
+                .find(|node| matches!(&node.kind, NodeKind::Element(element) if element.attribute("id") == Some(id)))
+                .unwrap()
+                .id;
+            &styled
+                .iter()
+                .find(|node| node.node_id == node_id)
+                .unwrap()
+                .style
+        };
+        let shorthand = style_for("shorthand");
+        assert!((shorthand.border_px - 4.0).abs() < f32::EPSILON);
+        assert_eq!(shorthand.border_color.as_deref(), Some("#123456"));
+        let longhand = style_for("longhand");
+        assert!((longhand.border_px - 2.0).abs() < f32::EPSILON);
+        assert_eq!(longhand.border_color.as_deref(), Some("red"));
+        assert!(style_for("none").border_px.abs() < f32::EPSILON);
+        assert_eq!(style_for("current").border_color.as_deref(), Some("green"));
+    }
+
+    #[test]
+    fn border_shorthand_rejects_unsupported_or_duplicate_styles() {
+        assert!(parse_border("2px dashed red", 16.0).is_none());
+        assert!(parse_border("2px solid solid", 16.0).is_none());
+        let border = parse_border("solid red", 16.0).unwrap();
+        assert!((border.width_px - 3.0).abs() < f32::EPSILON);
+        assert_eq!(border.color.as_deref(), Some("red"));
     }
 
     #[test]

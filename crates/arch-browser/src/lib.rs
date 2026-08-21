@@ -649,7 +649,7 @@ mod tests {
             }
         }
         documents.sort();
-        assert!(documents.len() >= 6, "fixture corpus unexpectedly shrank");
+        assert!(documents.len() >= 13, "fixture corpus unexpectedly shrank");
         let loader = Loader::default();
         for document in documents {
             let url = Url::from_file_path(&document).unwrap();
@@ -843,6 +843,35 @@ mod tests {
                     clip: Some(_),
                     ..
                 } if content.contains("Nested clipping")
+            )
+        }));
+    }
+
+    #[test]
+    fn border_shorthand_fixture_reaches_the_display_list() {
+        let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../fixtures/pages/12-border-shorthand/index.html")
+            .canonicalize()
+            .unwrap();
+        let page = render_url(
+            &Loader::default(),
+            &Url::from_file_path(fixture).unwrap(),
+            1280.0,
+        )
+        .unwrap();
+        assert!(page.display_list.commands.iter().any(|command| {
+            matches!(
+                command,
+                arch_paint::DisplayCommand::Box {
+                    border: Some(arch_paint::PaintColor {
+                        red: 36,
+                        green: 87,
+                        blue: 197,
+                        alpha: 255,
+                    }),
+                    border_width_px,
+                    ..
+                } if (*border_width_px - 4.0).abs() < f32::EPSILON
             )
         }));
     }
