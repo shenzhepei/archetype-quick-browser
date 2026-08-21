@@ -1275,6 +1275,7 @@ impl QuickBrowser {
             DisplayCommand::Text {
                 content,
                 size_px,
+                font_family,
                 link,
                 color,
                 line_height_px,
@@ -1290,6 +1291,7 @@ impl QuickBrowser {
                     .w(px(bounds.width))
                     .h(px(bounds.height))
                     .text_size(px(*size_px))
+                    .when_some(font_family.clone(), Styled::font_family)
                     .line_height(px(*line_height_px))
                     .when_some(*color, |text, color| text.text_color(gpui_color(color)))
                     .when(*font_weight == PageFontWeight::Bold, |text| {

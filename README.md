@@ -87,8 +87,8 @@ The scoped product requirements and detailed implementation plans are in:
 - Implemented: workspace and CI; desktop shell with title-bar tabs, compact Space switching, and
   per-Space root bookmarks; DOM and HTML parsing; initial CSS parser/cascade;
   recursive block boxes and inline text runs; serializable display lists with positioned text,
-  images, backgrounds, and borders; text color, weight, style, alignment, line height, and
-  white-space rendering; constrained document, stylesheet, PNG, and JPEG loading with image
+  images, backgrounds, and borders; text color, font family, weight, style, alignment, line height,
+  and white-space rendering; constrained document, stylesheet, PNG, and JPEG loading with image
   fallbacks; classified error pages; SQLite Space/Page persistence with corrupt-profile recovery;
   global tab persistence, hierarchical Space bookmark storage and root bookmark bar, navigation identity,
   redirects, links, and history; deterministic fixtures with a corpus-wide

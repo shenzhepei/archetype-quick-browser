@@ -14,6 +14,7 @@ pub enum DisplayCommand {
         bounds: Rect,
         content: String,
         size_px: f32,
+        font_family: Option<String>,
         link: Option<String>,
         color: Option<PaintColor>,
         line_height_px: f32,
@@ -67,6 +68,7 @@ pub fn paint(tree: &LayoutTree) -> DisplayList {
                     bounds: item.bounds,
                     content: content.clone(),
                     size_px: item.font_size_px,
+                    font_family: item.font_family.clone(),
                     link: item.link.clone(),
                     color: item.color.as_deref().and_then(parse_color),
                     line_height_px: item.line_height_px,
@@ -134,7 +136,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn preserves_computed_font_size_in_text_command() {
+    fn preserves_computed_typography_in_text_command() {
         let tree = LayoutTree {
             boxes: vec![LayoutBox {
                 node_id: NodeId(1),
@@ -143,6 +145,7 @@ mod tests {
                 image: None,
                 link: None,
                 font_size_px: 28.0,
+                font_family: Some("Helvetica Neue".to_owned()),
                 color: Some("#2468ac".to_owned()),
                 line_height_px: 39.2,
                 white_space: WhiteSpace::Normal,
@@ -159,6 +162,11 @@ mod tests {
             paint(&tree).commands.as_slice(),
             [DisplayCommand::Box { .. }, DisplayCommand::Text { size_px, .. }]
                 if (*size_px - 28.0).abs() < f32::EPSILON
+        ));
+        assert!(matches!(
+            paint(&tree).commands.as_slice(),
+            [DisplayCommand::Box { .. }, DisplayCommand::Text { font_family: Some(family), .. }]
+                if family == "Helvetica Neue"
         ));
         assert!(matches!(
             paint(&tree).commands.as_slice(),

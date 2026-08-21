@@ -787,6 +787,33 @@ mod tests {
     }
 
     #[test]
+    fn font_family_fixture_reaches_the_display_list() {
+        let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../fixtures/pages/10-font-family/index.html")
+            .canonicalize()
+            .unwrap();
+        let page = render_url(
+            &Loader::default(),
+            &Url::from_file_path(fixture).unwrap(),
+            1280.0,
+        )
+        .unwrap();
+        let family_for = |expected: &str| {
+            page.display_list.commands.iter().any(|command| {
+                matches!(
+                    command,
+                    arch_paint::DisplayCommand::Text {
+                        font_family: Some(family),
+                        ..
+                    } if family == expected
+                )
+            })
+        };
+        assert!(family_for("Helvetica Neue"));
+        assert!(family_for("Courier New"));
+    }
+
+    #[test]
     fn jpeg_loads_while_missing_image_keeps_alt_fallback() {
         let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../fixtures/pages/09-image-formats/index.html")

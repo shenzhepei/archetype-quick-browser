@@ -52,6 +52,30 @@ pub fn parse(source: &str) -> Stylesheet {
     Stylesheet { rules, diagnostics }
 }
 
+#[must_use]
+pub fn first_font_family(value: &str) -> Option<String> {
+    let mut input = ParserInput::new(value);
+    let mut input = Parser::new(&mut input);
+    let mut identifiers = Vec::new();
+    let mut quoted = None;
+
+    while let Ok(token) = input.next_including_whitespace_and_comments().cloned() {
+        match token {
+            Token::WhiteSpace(_) | Token::Comment(_) => {}
+            Token::Comma => break,
+            Token::QuotedString(value) if identifiers.is_empty() && quoted.is_none() => {
+                quoted = Some(value.to_string());
+            }
+            Token::Ident(value) if quoted.is_none() => identifiers.push(value.to_string()),
+            _ => return None,
+        }
+    }
+
+    quoted
+        .or_else(|| (!identifiers.is_empty()).then(|| identifiers.join(" ")))
+        .filter(|family| !family.is_empty())
+}
+
 #[derive(Default)]
 struct StylesheetAdapter {
     source_order: usize,
@@ -218,6 +242,7 @@ fn supported_property(name: &str) -> bool {
             | "color"
             | "background-color"
             | "font-size"
+            | "font-family"
             | "line-height"
             | "white-space"
             | "font-weight"
@@ -291,5 +316,24 @@ mod tests {
                 "ignored unsupported CSS property: unknown"
             ]
         );
+    }
+
+    #[test]
+    fn parses_first_quoted_or_unquoted_font_family() {
+        assert_eq!(
+            first_font_family(r#""Helvetica Neue", sans-serif"#).as_deref(),
+            Some("Helvetica Neue")
+        );
+        assert_eq!(
+            first_font_family("Helvetica Neue, sans-serif").as_deref(),
+            Some("Helvetica Neue")
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_first_font_family() {
+        assert_eq!(first_font_family("var(--font), sans-serif"), None);
+        assert_eq!(first_font_family(r#""Helvetica" Neue, sans-serif"#), None);
+        assert_eq!(first_font_family("  "), None);
     }
 }

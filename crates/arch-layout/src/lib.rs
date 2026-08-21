@@ -25,6 +25,7 @@ pub struct LayoutBox {
     pub image: Option<ImageBox>,
     pub link: Option<String>,
     pub font_size_px: f32,
+    pub font_family: Option<String>,
     pub color: Option<String>,
     pub line_height_px: f32,
     pub white_space: WhiteSpace,
@@ -164,6 +165,7 @@ impl<S: BuildHasher> LayoutContext<'_, S> {
                 image,
                 link: self.links.get(&node.id).cloned(),
                 font_size_px: style.font_size_px,
+                font_family: style.font_family.clone(),
                 color: style.color.clone(),
                 line_height_px: style.line_height_px,
                 white_space: style.white_space,
@@ -308,6 +310,7 @@ impl<S: BuildHasher> LayoutContext<'_, S> {
                 image,
                 link: self.links.get(&node_id).cloned(),
                 font_size_px: style.font_size_px,
+                font_family: style.font_family.clone(),
                 color: style.color.clone(),
                 line_height_px: style.line_height_px,
                 white_space: style.white_space,
@@ -391,6 +394,22 @@ mod tests {
             .collect();
         assert_eq!(text.len(), 2);
         assert!(text[1].bounds.y > text[0].bounds.y);
+    }
+
+    #[test]
+    fn preserves_computed_font_family_on_text_boxes() {
+        let document = parse_html("<p>family</p>");
+        let styled = style_document(
+            &document,
+            &parse_css(r#"p { font-family: "Helvetica Neue", sans-serif }"#),
+        );
+        let tree = layout(&document, &styled, 800.0, &HashMap::new(), &HashMap::new());
+        let text = tree
+            .boxes
+            .iter()
+            .find(|item| item.text.as_deref() == Some("family"))
+            .unwrap();
+        assert_eq!(text.font_family.as_deref(), Some("Helvetica Neue"));
     }
 
     #[test]

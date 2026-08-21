@@ -74,6 +74,7 @@ pub struct ComputedStyle {
     pub background_color: Option<String>,
     pub border_color: Option<String>,
     pub font_size_px: f32,
+    pub font_family: Option<String>,
     pub line_height_px: f32,
     pub white_space: WhiteSpace,
     pub font_weight: FontWeight,
@@ -217,6 +218,7 @@ fn ua_style(kind: &NodeKind, inherited: Option<&ComputedStyle>) -> ComputedStyle
     };
     if let Some(parent) = inherited {
         style.color.clone_from(&parent.color);
+        style.font_family.clone_from(&parent.font_family);
         if heading_font_size.is_none() {
             style.font_size_px = parent.font_size_px;
             style.line_height_px = parent.line_height_px;
@@ -349,6 +351,11 @@ fn apply(style: &mut ComputedStyle, declarations: &BTreeMap<&str, CascadeWinner<
             "color" => style.color = Some((*value).to_owned()),
             "background-color" => style.background_color = Some((*value).to_owned()),
             "border-color" => style.border_color = Some((*value).to_owned()),
+            "font-family" => {
+                if let Some(family) = arch_css::first_font_family(value) {
+                    style.font_family = Some(family);
+                }
+            }
             "margin" => {
                 if let Some(edges) = edge_sizes(value, style.font_size_px) {
                     style.margin = edges;
@@ -546,6 +553,25 @@ mod tests {
         let span = styled.iter().find(|node| node.node_id == span_id).unwrap();
         assert_eq!(span.style.color.as_deref(), Some("green"));
         assert!((span.style.font_size_px - 20.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn font_family_parses_and_inherits_to_text() {
+        let document = parse_html("<section><span>hello</span></section>");
+        let styled = style_document(
+            &document,
+            &parse(
+                r#"section { font-family: "Helvetica Neue", sans-serif }
+                   span { font-family: var(--font) }"#,
+            ),
+        );
+        let text_id = document
+            .descendants(document.root())
+            .find(|node| matches!(&node.kind, NodeKind::Text(value) if value == "hello"))
+            .unwrap()
+            .id;
+        let text = styled.iter().find(|node| node.node_id == text_id).unwrap();
+        assert_eq!(text.style.font_family.as_deref(), Some("Helvetica Neue"));
     }
 
     #[test]
