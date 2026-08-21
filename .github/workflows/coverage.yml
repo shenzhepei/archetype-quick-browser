@@ -21,7 +21,7 @@ jobs:
       - uses: taiki-e/install-action@cargo-llvm-cov
       - run: mkdir -p coverage
       - run: cargo llvm-cov --workspace --lcov --output-path coverage/lcov.info
-      - uses: codecov/codecov-action@v5
+      - uses: codecov/codecov-action@v7
         with:
           files: ./coverage/lcov.info
           use_oidc: true
