@@ -1,6 +1,6 @@
 use std::{borrow::Cow, path::PathBuf};
 
-use arch_browser::{BrowserCore, RenderedPage};
+use arch_browser::{BrowserCore, RenderError, RenderErrorKind, RenderedPage};
 use arch_net::{LoadError, LoadErrorKind};
 use arch_paint::{DisplayCommand, PaintColor};
 use arch_store::{Bookmark, BookmarkKind, Page, Space};
@@ -141,26 +141,45 @@ impl ErrorView {
     }
 
     fn navigation(language: Language, error: &anyhow::Error) -> Self {
-        let kind = error
-            .chain()
-            .find_map(|cause| cause.downcast_ref::<LoadError>())
-            .map(LoadError::kind);
-        let title = match kind {
-            Some(LoadErrorKind::UnsupportedScheme | LoadErrorKind::InvalidFileUrl) => {
-                language.unsupported_address()
-            }
-            Some(LoadErrorKind::ResourceTooLarge) => language.resource_too_large(),
-            Some(LoadErrorKind::File) => language.file_unavailable(),
-            Some(LoadErrorKind::Timeout) => language.request_timed_out(),
-            Some(LoadErrorKind::Connection) => language.connection_failed(),
-            Some(LoadErrorKind::HttpStatus) => language.http_request_failed(),
-            Some(LoadErrorKind::Network) => language.secure_network_request_failed(),
-            None => language.rendering_failed(),
-        };
         Self {
-            title,
+            title: navigation_error_title(language, error),
             detail: format!("{error:#}"),
         }
+    }
+}
+
+fn navigation_error_title(language: Language, error: &anyhow::Error) -> &'static str {
+    if let Some(kind) = error
+        .chain()
+        .find_map(|cause| cause.downcast_ref::<LoadError>())
+        .map(LoadError::kind)
+    {
+        return load_error_title(language, kind);
+    }
+    match error
+        .chain()
+        .find_map(|cause| cause.downcast_ref::<RenderError>())
+        .map(RenderError::kind)
+    {
+        Some(RenderErrorKind::Parse) => language.document_parsing_failed(),
+        Some(RenderErrorKind::Load(_) | RenderErrorKind::Render) | None => {
+            language.rendering_failed()
+        }
+    }
+}
+
+fn load_error_title(language: Language, kind: LoadErrorKind) -> &'static str {
+    match kind {
+        LoadErrorKind::UnsupportedScheme | LoadErrorKind::InvalidFileUrl => {
+            language.unsupported_address()
+        }
+        LoadErrorKind::ResourceTooLarge => language.resource_too_large(),
+        LoadErrorKind::File => language.file_unavailable(),
+        LoadErrorKind::Timeout => language.request_timed_out(),
+        LoadErrorKind::Tls => language.certificate_validation_failed(),
+        LoadErrorKind::Connection => language.connection_failed(),
+        LoadErrorKind::HttpStatus => language.http_request_failed(),
+        LoadErrorKind::Network => language.secure_network_request_failed(),
     }
 }
 
@@ -1636,6 +1655,36 @@ fn image_source(source: &str) -> gpui::ImageSource {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn navigation_errors_have_specific_localized_titles() {
+        assert_eq!(
+            load_error_title(Language::English, LoadErrorKind::Tls),
+            "Certificate validation failed"
+        );
+        assert_eq!(
+            load_error_title(Language::Chinese, LoadErrorKind::Tls),
+            "证书验证失败"
+        );
+
+        let invalid = std::hint::black_box([0xff]);
+        let parse_error = anyhow::Error::new(RenderError::Parse {
+            url: Url::parse("file:///invalid.html").unwrap(),
+            source: str::from_utf8(&invalid).unwrap_err(),
+        });
+        assert_eq!(
+            navigation_error_title(Language::English, &parse_error),
+            "Document parsing failed"
+        );
+
+        let render_error = anyhow::Error::new(RenderError::Render {
+            url: Url::parse("file:///invalid.html").unwrap(),
+        });
+        assert_eq!(
+            navigation_error_title(Language::Chinese, &render_error),
+            "渲染失败"
+        );
+    }
 
     #[test]
     fn clipping_helpers_preserve_global_and_relative_positions() {

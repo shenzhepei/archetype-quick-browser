@@ -2,10 +2,11 @@ use std::{collections::HashMap, path::Path, str};
 
 use anyhow::{Context, Result};
 use arch_dom::NodeKind;
-use arch_net::Loader;
+use arch_net::{LoadError, LoadErrorKind, Loader};
 use arch_paint::DisplayList;
 use arch_session::{BrowserCommand, BrowserEvent, PageId, Session};
 use arch_store::{Bookmark, Page, Space, Store};
+use thiserror::Error;
 use url::Url;
 use uuid::Uuid;
 
@@ -19,6 +20,42 @@ pub struct RenderedPage {
     pub display_list: DisplayList,
     pub diagnostics: Vec<String>,
     pub image_resources: HashMap<String, Vec<u8>>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RenderErrorKind {
+    Load(LoadErrorKind),
+    Parse,
+    Render,
+}
+
+#[derive(Debug, Error)]
+pub enum RenderError {
+    #[error("could not load {url}: {source}")]
+    Load {
+        url: Url,
+        #[source]
+        source: LoadError,
+    },
+    #[error("could not parse {url}: V3 only accepts UTF-8 HTML")]
+    Parse {
+        url: Url,
+        #[source]
+        source: str::Utf8Error,
+    },
+    #[error("could not render {url}: viewport width must be finite and greater than zero")]
+    Render { url: Url },
+}
+
+impl RenderError {
+    #[must_use]
+    pub fn kind(&self) -> RenderErrorKind {
+        match self {
+            Self::Load { source, .. } => RenderErrorKind::Load(source.kind()),
+            Self::Parse { .. } => RenderErrorKind::Parse,
+            Self::Render { .. } => RenderErrorKind::Render,
+        }
+    }
 }
 
 pub struct BrowserCore {
@@ -306,12 +343,20 @@ fn parsed_page_id(page: &Page) -> Option<PageId> {
 /// Loads and renders a UTF-8 static document into a V3 display list.
 ///
 /// # Errors
-/// Returns an error when loading fails or the document is not valid UTF-8.
+/// Returns a typed error when loading fails, the document is not valid UTF-8, or the viewport is
+/// invalid.
 pub fn render_url(loader: &Loader, url: &Url, viewport_width: f32) -> Result<RenderedPage> {
-    let response = loader
-        .load(url)
-        .with_context(|| format!("could not load {url}"))?;
-    let source = str::from_utf8(&response.body).context("V3 only accepts UTF-8 HTML")?;
+    if !viewport_width.is_finite() || viewport_width <= 0.0 {
+        return Err(RenderError::Render { url: url.clone() }.into());
+    }
+    let response = loader.load(url).map_err(|source| RenderError::Load {
+        url: url.clone(),
+        source,
+    })?;
+    let source = str::from_utf8(&response.body).map_err(|source| RenderError::Parse {
+        url: response.final_url.clone(),
+        source,
+    })?;
     let document = arch_html::parse(source);
     let mut css = inline_css(&document);
     let mut resource_diagnostics = Vec::new();
@@ -590,6 +635,22 @@ mod tests {
     use std::fs;
 
     use super::*;
+
+    #[test]
+    fn render_errors_classify_parse_and_viewport_failures() {
+        let path =
+            std::env::temp_dir().join(format!("archetype-invalid-utf8-{}.html", Uuid::now_v7()));
+        fs::write(&path, [0xff, 0xfe]).unwrap();
+        let url = Url::from_file_path(&path).unwrap();
+        let error = render_url(&Loader::default(), &url, 1280.0).unwrap_err();
+        let render_error = error.downcast_ref::<RenderError>().unwrap();
+        assert_eq!(render_error.kind(), RenderErrorKind::Parse);
+        fs::remove_file(path).unwrap();
+
+        let error = render_url(&Loader::default(), &url, 0.0).unwrap_err();
+        let render_error = error.downcast_ref::<RenderError>().unwrap();
+        assert_eq!(render_error.kind(), RenderErrorKind::Render);
+    }
 
     #[test]
     fn application_core_persists_bookmarks_in_folder() {

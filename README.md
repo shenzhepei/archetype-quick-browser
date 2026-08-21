@@ -27,7 +27,7 @@ layout, and PNG/JPEG display.
 
 - Desktop tabs, Spaces, nested bookmarks, and persisted navigation history.
 - HTML5 parsing and an initial CSS parser, cascade, style, layout, and paint pipeline.
-- Constrained local and HTTP(S) resource loading with classified error pages.
+- Constrained local and HTTP(S) resource loading with classified TLS, parsing, and rendering error pages.
 - PNG and JPEG decoding, recursive block layout, inline text, borders, and backgrounds.
 - SQLite-backed browser state with corrupt-profile recovery.
 

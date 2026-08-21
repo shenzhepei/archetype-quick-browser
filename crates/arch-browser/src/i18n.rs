@@ -40,6 +40,10 @@ impl Language {
         self.select("请求超时", "Request timed out")
     }
 
+    pub(crate) const fn certificate_validation_failed(self) -> &'static str {
+        self.select("证书验证失败", "Certificate validation failed")
+    }
+
     pub(crate) const fn connection_failed(self) -> &'static str {
         self.select("连接失败", "Connection failed")
     }
@@ -54,6 +58,10 @@ impl Language {
 
     pub(crate) const fn rendering_failed(self) -> &'static str {
         self.select("渲染失败", "Rendering failed")
+    }
+
+    pub(crate) const fn document_parsing_failed(self) -> &'static str {
+        self.select("文档解析失败", "Document parsing failed")
     }
 
     pub(crate) const fn default_space_name(self) -> &'static str {

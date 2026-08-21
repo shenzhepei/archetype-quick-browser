@@ -33,6 +33,7 @@ pub enum LoadErrorKind {
     ResourceTooLarge,
     File,
     Timeout,
+    Tls,
     Connection,
     HttpStatus,
     Network,
@@ -47,12 +48,24 @@ impl LoadError {
             Self::ResourceTooLarge { .. } => LoadErrorKind::ResourceTooLarge,
             Self::File(_) => LoadErrorKind::File,
             Self::Network(error) if error.is_timeout() => LoadErrorKind::Timeout,
+            Self::Network(error) if error_chain_contains_tls(error) => LoadErrorKind::Tls,
             Self::Network(error) if error.is_connect() => LoadErrorKind::Connection,
             Self::Network(error) if error.status().is_some() => LoadErrorKind::HttpStatus,
             Self::Network(_) => LoadErrorKind::Network,
             Self::InvalidFileUrl => LoadErrorKind::InvalidFileUrl,
         }
     }
+}
+
+fn error_chain_contains_tls(error: &(dyn std::error::Error + 'static)) -> bool {
+    let mut current = Some(error);
+    while let Some(cause) = current {
+        if cause.downcast_ref::<rustls::Error>().is_some() {
+            return true;
+        }
+        current = cause.source();
+    }
+    false
 }
 
 pub struct Loader {
@@ -170,5 +183,11 @@ mod tests {
             error,
             Err(LoadError::ResourceTooLarge { limit: 1 })
         ));
+    }
+
+    #[test]
+    fn recognizes_tls_errors_in_an_error_chain() {
+        let error = rustls::Error::General("certificate validation failed".to_owned());
+        assert!(error_chain_contains_tls(&error));
     }
 }

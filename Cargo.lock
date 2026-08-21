@@ -119,6 +119,7 @@ dependencies = [
  "gpui-component-assets",
  "image",
  "sys-locale",
+ "thiserror 2.0.20",
  "url",
  "uuid",
 ]
@@ -163,6 +164,7 @@ name = "arch-net"
 version = "0.3.0"
 dependencies = [
  "reqwest",
+ "rustls",
  "thiserror 2.0.20",
  "url",
 ]
