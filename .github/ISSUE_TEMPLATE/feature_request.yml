@@ -1,0 +1,43 @@
+name: Feature request
+description: Suggest a focused improvement to Archetype Quick Browser
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: Thanks for helping improve the project.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: Describe the user need or browser-engine limitation this request addresses.
+      placeholder: What is difficult or impossible today?
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed solution
+      description: Describe the expected behavior and a practical solution.
+      placeholder: What should the project do?
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Describe workarounds or other approaches you considered.
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Add examples, screenshots, standards references, or links that clarify the request.
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: I searched existing issues for similar requests.
+          required: true
+        - label: This request describes one focused functional improvement.
+          required: true
