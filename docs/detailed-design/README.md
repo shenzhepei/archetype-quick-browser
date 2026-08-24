@@ -10,5 +10,6 @@
 | 04 | [Archetype Rust SDK 与 Runtime 详设](./04-Archetype-Rust-SDK与Runtime详设.md) | [04 Rust SDK 与 Runtime PRD](../prd/04-Archetype-Rust-SDK与Runtime-PRD.md) | Rust-only SDK、版本化 IPC、独立 Runtime、安全与交付边界 |
 | 05 | [Archetype V4 安全运行时详设](./05-Archetype-V4-安全运行时详设.md) | [05 Archetype V4 安全运行时 PRD](../prd/05-Archetype-V4-安全运行时-PRD.md) | 稳定类型、内部 IPC、Renderer 隔离、macOS 沙箱、基础会话与 Flexbox |
 | 06 | [Archetype V5 Rust SDK 预览详设](./06-Archetype-V5-Rust-SDK预览详设.md) | [06 Archetype V5 Rust SDK 预览 PRD](../prd/06-Archetype-V5-Rust-SDK预览-PRD.md) | SDK 0.1、异步 Runtime 生命周期、公开 RGBA 帧与合作方示例 |
+| 07 | [Archetype V6 静态响应式 CSS 详设](./07-Archetype-V6-静态响应式CSS详设.md) | [07 Archetype V6 静态响应式 CSS PRD](../prd/07-Archetype-V6-静态响应式CSS-PRD.md) | 变量、宽度媒体查询、Flex item 与静态定位 |
 
 产品「做什么/不做什么」见 [`../prd/`](../prd/)。
