@@ -3,6 +3,7 @@ use std::{
     io::{Read, Write},
 };
 
+use archetype_types::{ArchetypeUrl, NavigationId, PageId};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use thiserror::Error;
@@ -12,6 +13,12 @@ pub const PROTOCOL_MAJOR: u16 = 4;
 pub const PROTOCOL_MINOR: u16 = 0;
 pub const MAX_FRAME_BODY_BYTES: usize = 16 * 1024 * 1024;
 const MAX_FRAME_BODY_BYTES_U32: u32 = 16 * 1024 * 1024;
+
+mod router;
+mod transport;
+
+pub use router::{RequestRouter, RoutedResponse, RouterError};
+pub use transport::{MemoryEndpoint, TransportError, memory_transport};
 
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[serde(transparent)]
@@ -96,11 +103,34 @@ pub struct Rejected {
     pub message: String,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum Request {
+    Navigate {
+        page_id: PageId,
+        navigation_id: NavigationId,
+        url: ArchetypeUrl,
+    },
+    Cancel {
+        target_request_id: u64,
+    },
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum Response {
+    Accepted,
+    Cancelled { target_request_id: u64 },
+    Failed { code: String, message: String },
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Message {
     ClientHello(ClientHello),
     ServerHello(ServerHello),
     Rejected(Rejected),
+    Request(Request),
+    Response(Response),
 }
 
 impl Message {
@@ -109,6 +139,8 @@ impl Message {
             Self::ClientHello(_) => "client_hello",
             Self::ServerHello(_) => "server_hello",
             Self::Rejected(_) => "rejected",
+            Self::Request(_) => "request",
+            Self::Response(_) => "response",
         }
     }
 
@@ -117,6 +149,8 @@ impl Message {
             Self::ClientHello(payload) => Ok(serde_json::to_value(payload)?),
             Self::ServerHello(payload) => Ok(serde_json::to_value(payload)?),
             Self::Rejected(payload) => Ok(serde_json::to_value(payload)?),
+            Self::Request(payload) => Ok(serde_json::to_value(payload)?),
+            Self::Response(payload) => Ok(serde_json::to_value(payload)?),
         }
     }
 
@@ -125,6 +159,8 @@ impl Message {
             "client_hello" => Ok(Self::ClientHello(serde_json::from_value(payload)?)),
             "server_hello" => Ok(Self::ServerHello(serde_json::from_value(payload)?)),
             "rejected" => Ok(Self::Rejected(serde_json::from_value(payload)?)),
+            "request" => Ok(Self::Request(serde_json::from_value(payload)?)),
+            "response" => Ok(Self::Response(serde_json::from_value(payload)?)),
             _ => Err(ProtocolError::UnknownMessageKind(kind.to_owned())),
         }
     }
@@ -177,6 +213,11 @@ impl Envelope {
     #[must_use]
     pub const fn message(&self) -> &Message {
         &self.message
+    }
+
+    #[must_use]
+    pub fn into_message(self) -> Message {
+        self.message
     }
 }
 
