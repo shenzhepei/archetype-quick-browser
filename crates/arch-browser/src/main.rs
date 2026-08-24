@@ -14,14 +14,7 @@ fn main() -> Result<()> {
     if let Err(error) = logging::init() {
         eprintln!("could not initialize local logging: {error}");
     }
-    logging::event(
-        logging::Level::Info,
-        "application_started",
-        [(
-            "mode",
-            serde_json::json!(if inspect_mode { "inspect" } else { "desktop" }),
-        )],
-    );
+    logging::application_started(inspect_mode);
     let result = if inspect_mode {
         inspect(env::args().nth(2))
     } else {
@@ -29,11 +22,7 @@ fn main() -> Result<()> {
         Ok(())
     };
     if let Err(error) = &result {
-        logging::event(
-            logging::Level::Error,
-            "application_failed",
-            [("error", serde_json::json!(format!("{error:#}")))],
-        );
+        logging::application_failed(&format!("{error:#}"));
     }
     result
 }
@@ -42,21 +31,11 @@ fn inspect(input: Option<String>) -> Result<()> {
     let input = input.unwrap_or_else(|| "fixtures/pages/01-document/index.html".to_owned());
     let url = parse_input(&input)?;
     let page = render_url(&Loader::new()?, &url, 1280.0)?;
-    logging::event(
-        logging::Level::Info,
-        "inspection_completed",
-        [
-            ("url", serde_json::json!(page.final_url.as_str())),
-            ("title", serde_json::json!(&page.title)),
-            (
-                "display_command_count",
-                serde_json::json!(page.display_list.commands.len()),
-            ),
-            (
-                "diagnostic_count",
-                serde_json::json!(page.diagnostics.len()),
-            ),
-        ],
+    logging::inspection_completed(
+        page.final_url.as_str(),
+        &page.title,
+        page.display_list.commands.len(),
+        page.diagnostics.len(),
     );
     println!("Archetype V3");
     println!("title: {}", page.title);
@@ -64,11 +43,7 @@ fn inspect(input: Option<String>) -> Result<()> {
     println!("display commands: {}", page.display_list.commands.len());
     println!("content height: {:.1}px", page.display_list.content_height);
     for diagnostic in page.diagnostics {
-        logging::event(
-            logging::Level::Warn,
-            "render_diagnostic",
-            [("message", serde_json::json!(&diagnostic))],
-        );
+        logging::render_diagnostic(None, &diagnostic);
         eprintln!("diagnostic: {diagnostic}");
     }
     Ok(())
