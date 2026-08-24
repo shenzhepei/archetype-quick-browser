@@ -50,7 +50,15 @@ updates:
     schedule:
       interval: weekly
   - package-ecosystem: cargo
+    directory: /crates/archetype-raster
+    schedule:
+      interval: weekly
+  - package-ecosystem: cargo
     directory: /crates/archetype-runtime
+    schedule:
+      interval: weekly
+  - package-ecosystem: cargo
+    directory: /crates/archetype-sdk
     schedule:
       interval: weekly
   - package-ecosystem: cargo

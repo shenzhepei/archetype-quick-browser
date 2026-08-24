@@ -18,6 +18,7 @@ jobs:
         run: |
           test "${GITHUB_REF_NAME#v}" = "$(sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml | head -1)"
           scripts/verify_support_matrix.sh
+          scripts/verify_sdk_compatibility.sh
       - run: cargo test --workspace
       - run: cargo build --release --bins
       - name: Package unsigned developer build
