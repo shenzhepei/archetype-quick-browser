@@ -6,7 +6,7 @@ use arch_net::{LoadError, LoadErrorKind, Loader};
 use arch_paint::DisplayList;
 use arch_session::{BrowserCommand, BrowserEvent, Session};
 use arch_store::{Bookmark, Page, Space, Store};
-use archetype_types::{NavigationId, PageId};
+use archetype_types::{ArchetypeUrl, LoadStage, NavigationId, PageId};
 use thiserror::Error;
 use url::Url;
 
@@ -106,7 +106,7 @@ impl BrowserCore {
         };
         for page in core.store.pages()? {
             if let Ok(id) = page.id.parse::<PageId>() {
-                if let Ok(url) = Url::parse(&page.url) {
+                if let Ok(url) = page.url.parse::<ArchetypeUrl>() {
                     core.session.restore_page(id, url);
                 } else {
                     core.session.open_page(id);
@@ -275,10 +275,11 @@ impl BrowserCore {
     /// Returns an error when the page ID is invalid.
     pub fn start_navigation(&mut self, page: &Page, url: &Url) -> Result<PendingNavigation> {
         let page_id = parsed_page_id(page).context("page has invalid UUID")?;
-        self.start_command(BrowserCommand::Navigate {
-            page_id,
-            url: url.clone(),
-        })
+        let url = url
+            .as_str()
+            .parse::<ArchetypeUrl>()
+            .context("navigation URL is invalid")?;
+        self.start_command(BrowserCommand::Navigate { page_id, url })
     }
 
     /// Starts a history-back navigation without blocking the caller.
@@ -318,11 +319,15 @@ impl BrowserCore {
         pending: &PendingNavigation,
         rendered: &RenderedPage,
     ) -> Result<bool> {
-        if !self.session.commit_final_url(
-            &pending.page_id,
-            pending.navigation_id,
-            rendered.final_url.clone(),
-        ) {
+        let final_url = rendered
+            .final_url
+            .as_str()
+            .parse::<ArchetypeUrl>()
+            .context("final navigation URL is invalid")?;
+        if !self
+            .session
+            .commit_final_url(&pending.page_id, pending.navigation_id, final_url)
+        {
             return Ok(false);
         }
         self.store.update_page_navigation(
@@ -342,7 +347,7 @@ impl BrowserCore {
         Ok(matches!(
             self.session.handle(BrowserCommand::Stop { page_id }),
             BrowserEvent::LoadStageChanged {
-                stage: arch_session::LoadStage::Cancelled,
+                stage: LoadStage::Cancelled,
                 ..
             }
         ))
@@ -389,6 +394,7 @@ impl BrowserCore {
         else {
             anyhow::bail!("navigation command was ignored");
         };
+        let url = Url::parse(url.as_str()).context("session returned invalid navigation URL")?;
         Ok(PendingNavigation {
             page_id,
             navigation_id,

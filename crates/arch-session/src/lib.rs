@@ -1,8 +1,7 @@
 use std::collections::HashMap;
 
-pub use archetype_types::{NavigationId, PageId};
+pub use archetype_types::{ArchetypeUrl, LoadStage, NavigationId, PageId};
 use serde::{Deserialize, Serialize};
-use url::Url;
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Viewport {
@@ -12,7 +11,7 @@ pub struct Viewport {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum BrowserCommand {
-    Navigate { page_id: PageId, url: Url },
+    Navigate { page_id: PageId, url: ArchetypeUrl },
     Back { page_id: PageId },
     Forward { page_id: PageId },
     Reload { page_id: PageId },
@@ -21,21 +20,12 @@ pub enum BrowserCommand {
     Scroll { page_id: PageId, delta_y: f32 },
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum LoadStage {
-    Loading,
-    Parsed,
-    LaidOut,
-    Ready,
-    Cancelled,
-}
-
 #[derive(Clone, Debug, PartialEq)]
 pub enum BrowserEvent {
     NavigationStarted {
         page_id: PageId,
         navigation_id: NavigationId,
-        url: Url,
+        url: ArchetypeUrl,
     },
     LoadStageChanged {
         page_id: PageId,
@@ -50,7 +40,7 @@ pub enum BrowserEvent {
     NavigationFinished {
         page_id: PageId,
         navigation_id: NavigationId,
-        final_url: Url,
+        final_url: ArchetypeUrl,
     },
     NavigationFailed {
         page_id: PageId,
@@ -70,7 +60,7 @@ pub enum BrowserEvent {
 
 #[derive(Clone, Debug)]
 struct PageState {
-    history: Vec<Url>,
+    history: Vec<ArchetypeUrl>,
     cursor: usize,
     navigation_id: NavigationId,
     viewport: Viewport,
@@ -102,7 +92,7 @@ impl Session {
         self.pages.entry(page_id).or_default();
     }
 
-    pub fn restore_page(&mut self, page_id: PageId, url: Url) {
+    pub fn restore_page(&mut self, page_id: PageId, url: ArchetypeUrl) {
         self.pages.insert(
             page_id,
             PageState {
@@ -213,7 +203,7 @@ impl Session {
         &mut self,
         page_id: &PageId,
         navigation_id: NavigationId,
-        final_url: Url,
+        final_url: ArchetypeUrl,
     ) -> bool {
         let Some(page) = self.pages.get_mut(page_id) else {
             return false;
@@ -229,7 +219,7 @@ impl Session {
     }
 }
 
-fn start(page_id: PageId, page: &mut PageState, url: Url) -> BrowserEvent {
+fn start(page_id: PageId, page: &mut PageState, url: ArchetypeUrl) -> BrowserEvent {
     page.navigation_id = page.navigation_id.saturating_next();
     page.scroll_y = 0.0;
     BrowserEvent::NavigationStarted {
@@ -243,17 +233,21 @@ fn start(page_id: PageId, page: &mut PageState, url: Url) -> BrowserEvent {
 mod tests {
     use super::*;
 
+    fn parse_url(value: &str) -> ArchetypeUrl {
+        value.parse().unwrap()
+    }
+
     #[test]
     fn navigation_ids_increase_and_stale_results_are_rejected() {
         let mut session = Session::default();
         let page_id = PageId::new();
         let first = session.handle(BrowserCommand::Navigate {
             page_id: page_id.clone(),
-            url: Url::parse("https://example.com/one").unwrap(),
+            url: parse_url("https://example.com/one"),
         });
         let second = session.handle(BrowserCommand::Navigate {
             page_id: page_id.clone(),
-            url: Url::parse("https://example.com/two").unwrap(),
+            url: parse_url("https://example.com/two"),
         });
         let id = |event| match event {
             BrowserEvent::NavigationStarted { navigation_id, .. } => navigation_id,
@@ -270,7 +264,7 @@ mod tests {
         for url in ["https://example.com/one", "https://example.com/two"] {
             let _ = session.handle(BrowserCommand::Navigate {
                 page_id: page_id.clone(),
-                url: Url::parse(url).unwrap(),
+                url: parse_url(url),
             });
         }
         let back = session.handle(BrowserCommand::Back {
@@ -278,10 +272,10 @@ mod tests {
         });
         let forward = session.handle(BrowserCommand::Forward { page_id });
         assert!(
-            matches!(back, BrowserEvent::NavigationStarted { url, .. } if url.path() == "/one")
+            matches!(back, BrowserEvent::NavigationStarted { url, .. } if url.as_str().ends_with("/one"))
         );
         assert!(
-            matches!(forward, BrowserEvent::NavigationStarted { url, .. } if url.path() == "/two")
+            matches!(forward, BrowserEvent::NavigationStarted { url, .. } if url.as_str().ends_with("/two"))
         );
     }
 
@@ -289,13 +283,10 @@ mod tests {
     fn restored_page_can_reload_its_current_url() {
         let mut session = Session::default();
         let page_id = PageId::new();
-        session.restore_page(
-            page_id.clone(),
-            Url::parse("https://example.com/restored").unwrap(),
-        );
+        session.restore_page(page_id.clone(), parse_url("https://example.com/restored"));
         let reload = session.handle(BrowserCommand::Reload { page_id });
         assert!(
-            matches!(reload, BrowserEvent::NavigationStarted { url, .. } if url.path() == "/restored")
+            matches!(reload, BrowserEvent::NavigationStarted { url, .. } if url.as_str().ends_with("/restored"))
         );
     }
 
@@ -304,8 +295,8 @@ mod tests {
         let mut session = Session::default();
         let page_id = PageId::new();
         session.open_page(page_id.clone());
-        let requested = Url::parse("https://example.test/old").unwrap();
-        let final_url = Url::parse("https://example.test/new").unwrap();
+        let requested = parse_url("https://example.test/old");
+        let final_url = parse_url("https://example.test/new");
         let started = session.handle(BrowserCommand::Navigate {
             page_id: page_id.clone(),
             url: requested,
@@ -336,7 +327,7 @@ mod tests {
         for url in ["https://example.com/one", "https://example.com/two"] {
             let _ = session.handle(BrowserCommand::Navigate {
                 page_id: page_id.clone(),
-                url: Url::parse(url).unwrap(),
+                url: parse_url(url),
             });
         }
         assert!(session.can_go_back(&page_id));
@@ -355,7 +346,7 @@ mod tests {
         let page_id = PageId::new();
         let started = session.handle(BrowserCommand::Navigate {
             page_id: page_id.clone(),
-            url: Url::parse("https://example.com/slow").unwrap(),
+            url: parse_url("https://example.com/slow"),
         });
         let BrowserEvent::NavigationStarted { navigation_id, .. } = started else {
             panic!("navigation should start");

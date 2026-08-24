@@ -8,7 +8,6 @@ rust-version.workspace = true
 [dependencies]
 archetype-types = { path = "../archetype-types" }
 serde.workspace = true
-url.workspace = true
 
 [lints]
 workspace = true

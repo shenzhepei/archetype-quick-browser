@@ -1,6 +1,7 @@
 use std::{error::Error, fmt, str::FromStr};
 
 use serde::{Deserialize, Deserializer, Serialize};
+use url::Url;
 use uuid::{Uuid, Version};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize)]
@@ -65,6 +66,54 @@ impl fmt::Display for ParsePageIdError {
 
 impl Error for ParsePageIdError {}
 
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize)]
+#[serde(transparent)]
+pub struct ArchetypeUrl(String);
+
+impl ArchetypeUrl {
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Display for ArchetypeUrl {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(&self.0)
+    }
+}
+
+impl FromStr for ArchetypeUrl {
+    type Err = ParseArchetypeUrlError;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        let url = Url::parse(value).map_err(|_| ParseArchetypeUrlError)?;
+        Ok(Self(url.to_string()))
+    }
+}
+
+impl<'de> Deserialize<'de> for ArchetypeUrl {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        String::deserialize(deserializer)?
+            .parse()
+            .map_err(serde::de::Error::custom)
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ParseArchetypeUrlError;
+
+impl fmt::Display for ParseArchetypeUrlError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("invalid absolute URL")
+    }
+}
+
+impl Error for ParseArchetypeUrlError {}
+
 #[derive(
     Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize,
 )]
@@ -86,6 +135,17 @@ impl NavigationId {
     pub const fn saturating_next(self) -> Self {
         Self(self.0.saturating_add(1))
     }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[non_exhaustive]
+#[serde(rename_all = "snake_case")]
+pub enum LoadStage {
+    Loading,
+    Parsed,
+    LaidOut,
+    Ready,
+    Cancelled,
 }
 
 #[cfg(test)]
@@ -116,6 +176,28 @@ mod tests {
                 .parse::<PageId>()
                 .is_err()
         );
+    }
+
+    #[test]
+    fn archetype_url_json_is_a_validated_string() {
+        let url = "https://example.com/a%20path?query=value"
+            .parse::<ArchetypeUrl>()
+            .unwrap();
+        let json = serde_json::to_string(&url).unwrap();
+        assert_eq!(json, format!("\"{url}\""));
+        assert_eq!(serde_json::from_str::<ArchetypeUrl>(&json).unwrap(), url);
+        assert!(serde_json::from_str::<ArchetypeUrl>("\"relative/path\"").is_err());
+    }
+
+    #[test]
+    fn load_stage_has_a_stable_json_shape() {
+        let json = serde_json::to_string(&LoadStage::Cancelled).unwrap();
+        assert_eq!(json, "\"cancelled\"");
+        assert_eq!(
+            serde_json::from_str::<LoadStage>(&json).unwrap(),
+            LoadStage::Cancelled
+        );
+        assert!(serde_json::from_str::<LoadStage>("\"unknown\"").is_err());
     }
 
     #[test]

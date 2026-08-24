@@ -190,7 +190,6 @@ version = "0.3.0"
 dependencies = [
  "archetype-types",
  "serde",
- "url",
 ]
 
 [[package]]
@@ -218,6 +217,7 @@ version = "0.3.0"
 dependencies = [
  "serde",
  "serde_json",
+ "url",
  "uuid",
 ]
 
