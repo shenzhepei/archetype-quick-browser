@@ -10,6 +10,7 @@ cargo-fuzz = true
 [dependencies]
 arch-css = { path = "../crates/arch-css" }
 arch-html = { path = "../crates/arch-html" }
+archetype-protocol = { path = "../crates/archetype-protocol" }
 libfuzzer-sys = "0.4"
 
 [[bin]]
@@ -22,6 +23,13 @@ bench = false
 [[bin]]
 name = "css"
 path = "fuzz_targets/css.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "protocol"
+path = "fuzz_targets/protocol.rs"
 test = false
 doc = false
 bench = false

@@ -1,0 +1,1 @@
+{"magic":"ARCH","protocol_major":4,"protocol_minor":0,"kind":"client_hello","request_id":1,"payload_length":0,"payload":{"minimum_protocol_minor":0,"maximum_protocol_minor":0,"capabilities":["static_document"]}}

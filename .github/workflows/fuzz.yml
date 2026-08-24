@@ -18,3 +18,4 @@ jobs:
           tool: cargo-fuzz
       - run: cargo +nightly fuzz run html -- -max_total_time=20 -timeout=5
       - run: cargo +nightly fuzz run css -- -max_total_time=20 -timeout=5
+      - run: cargo +nightly fuzz run protocol -- -max_total_time=20 -timeout=5
