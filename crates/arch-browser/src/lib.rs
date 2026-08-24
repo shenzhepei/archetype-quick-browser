@@ -4,11 +4,11 @@ use anyhow::{Context, Result};
 use arch_dom::NodeKind;
 use arch_net::{LoadError, LoadErrorKind, Loader};
 use arch_paint::DisplayList;
-use arch_session::{BrowserCommand, BrowserEvent, PageId, Session};
+use arch_session::{BrowserCommand, BrowserEvent, Session};
 use arch_store::{Bookmark, Page, Space, Store};
+use archetype_types::{NavigationId, PageId};
 use thiserror::Error;
 use url::Url;
-use uuid::Uuid;
 
 pub mod snapshot;
 
@@ -69,7 +69,7 @@ pub struct BrowserCore {
 #[derive(Clone, Debug)]
 pub struct PendingNavigation {
     page_id: PageId,
-    navigation_id: arch_session::NavigationId,
+    navigation_id: NavigationId,
     url: Url,
 }
 
@@ -105,11 +105,11 @@ impl BrowserCore {
             loader: Loader::new()?,
         };
         for page in core.store.pages()? {
-            if let Ok(id) = Uuid::parse_str(&page.id) {
+            if let Ok(id) = page.id.parse::<PageId>() {
                 if let Ok(url) = Url::parse(&page.url) {
-                    core.session.restore_page(PageId::from_uuid(id), url);
+                    core.session.restore_page(id, url);
                 } else {
-                    core.session.open_page(PageId::from_uuid(id));
+                    core.session.open_page(id);
                 }
             }
         }
@@ -209,8 +209,11 @@ impl BrowserCore {
     /// Returns an error when the database transaction fails.
     pub fn create_page(&mut self, url: &Url) -> Result<Page> {
         let page = self.store.create_page(url.as_str())?;
-        let id = Uuid::parse_str(&page.id).context("store generated invalid page UUID")?;
-        self.session.open_page(PageId::from_uuid(id));
+        let id = page
+            .id
+            .parse::<PageId>()
+            .context("store generated invalid page UUID")?;
+        self.session.open_page(id);
         Ok(page)
     }
 
@@ -219,8 +222,8 @@ impl BrowserCore {
     /// # Errors
     /// Returns an error when the page ID is invalid or the database transaction fails.
     pub fn close_page(&mut self, page: &Page) -> Result<bool> {
-        let id = Uuid::parse_str(&page.id).context("page has invalid UUID")?;
-        self.session.close_page(PageId::from_uuid(id));
+        let id = page.id.parse::<PageId>().context("page has invalid UUID")?;
+        self.session.close_page(&id);
         Ok(self.store.delete_page(&page.id)?)
     }
 
@@ -316,7 +319,7 @@ impl BrowserCore {
         rendered: &RenderedPage,
     ) -> Result<bool> {
         if !self.session.commit_final_url(
-            pending.page_id,
+            &pending.page_id,
             pending.navigation_id,
             rendered.final_url.clone(),
         ) {
@@ -347,19 +350,20 @@ impl BrowserCore {
 
     #[must_use]
     pub fn accepts_navigation(&self, pending: &PendingNavigation) -> bool {
-        self.session.accepts(pending.page_id, pending.navigation_id)
+        self.session
+            .accepts(&pending.page_id, pending.navigation_id)
     }
 
     /// Reports whether the page has an older in-memory history entry.
     #[must_use]
     pub fn can_go_back(&self, page: &Page) -> bool {
-        parsed_page_id(page).is_some_and(|page_id| self.session.can_go_back(page_id))
+        parsed_page_id(page).is_some_and(|page_id| self.session.can_go_back(&page_id))
     }
 
     /// Reports whether the page has a newer in-memory history entry.
     #[must_use]
     pub fn can_go_forward(&self, page: &Page) -> bool {
-        parsed_page_id(page).is_some_and(|page_id| self.session.can_go_forward(page_id))
+        parsed_page_id(page).is_some_and(|page_id| self.session.can_go_forward(&page_id))
     }
 
     fn execute_navigation(
@@ -426,7 +430,7 @@ impl BrowserCore {
 }
 
 fn parsed_page_id(page: &Page) -> Option<PageId> {
-    Uuid::parse_str(&page.id).ok().map(PageId::from_uuid)
+    page.id.parse().ok()
 }
 
 /// Loads and renders a UTF-8 static document into a V3 display list.
@@ -724,6 +728,7 @@ mod tests {
     use std::{collections::BTreeMap, fs};
 
     use super::*;
+    use uuid::Uuid;
 
     #[derive(serde::Deserialize)]
     struct FixtureExpectation {

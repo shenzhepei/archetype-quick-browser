@@ -113,6 +113,7 @@ dependencies = [
  "arch-session",
  "arch-store",
  "arch-style",
+ "archetype-types",
  "cosmic-text",
  "directories",
  "fontdb 0.16.2",
@@ -187,9 +188,9 @@ dependencies = [
 name = "arch-session"
 version = "0.3.0"
 dependencies = [
+ "archetype-types",
  "serde",
  "url",
- "uuid",
 ]
 
 [[package]]
@@ -209,6 +210,15 @@ dependencies = [
  "arch-dom",
  "arch-html",
  "serde",
+]
+
+[[package]]
+name = "archetype-types"
+version = "0.3.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "uuid",
 ]
 
 [[package]]

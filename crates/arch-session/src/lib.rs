@@ -1,31 +1,8 @@
 use std::collections::HashMap;
 
+pub use archetype_types::{NavigationId, PageId};
 use serde::{Deserialize, Serialize};
 use url::Url;
-use uuid::Uuid;
-
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
-pub struct PageId(pub Uuid);
-
-impl PageId {
-    #[must_use]
-    pub fn new() -> Self {
-        Self(Uuid::now_v7())
-    }
-
-    #[must_use]
-    pub const fn from_uuid(id: Uuid) -> Self {
-        Self(id)
-    }
-}
-
-impl Default for PageId {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-pub type NavigationId = u64;
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Viewport {
@@ -105,7 +82,7 @@ impl Default for PageState {
         Self {
             history: Vec::new(),
             cursor: 0,
-            navigation_id: 0,
+            navigation_id: NavigationId::zero(),
             viewport: Viewport {
                 width: 1280.0,
                 height: 800.0,
@@ -135,21 +112,21 @@ impl Session {
         );
     }
 
-    pub fn close_page(&mut self, page_id: PageId) {
-        self.pages.remove(&page_id);
+    pub fn close_page(&mut self, page_id: &PageId) {
+        self.pages.remove(page_id);
     }
 
     #[must_use]
-    pub fn can_go_back(&self, page_id: PageId) -> bool {
+    pub fn can_go_back(&self, page_id: &PageId) -> bool {
         self.pages
-            .get(&page_id)
+            .get(page_id)
             .is_some_and(|page| !page.history.is_empty() && page.cursor > 0)
     }
 
     #[must_use]
-    pub fn can_go_forward(&self, page_id: PageId) -> bool {
+    pub fn can_go_forward(&self, page_id: &PageId) -> bool {
         self.pages
-            .get(&page_id)
+            .get(page_id)
             .is_some_and(|page| page.cursor + 1 < page.history.len())
     }
 
@@ -157,7 +134,7 @@ impl Session {
     pub fn handle(&mut self, command: BrowserCommand) -> BrowserEvent {
         match command {
             BrowserCommand::Navigate { page_id, url } => {
-                let page = self.pages.entry(page_id).or_default();
+                let page = self.pages.entry(page_id.clone()).or_default();
                 if !page.history.is_empty() {
                     page.history.truncate(page.cursor + 1);
                 }
@@ -199,7 +176,7 @@ impl Session {
                     return BrowserEvent::Ignored;
                 };
                 let navigation_id = page.navigation_id;
-                page.navigation_id = page.navigation_id.saturating_add(1);
+                page.navigation_id = page.navigation_id.saturating_next();
                 BrowserEvent::LoadStageChanged {
                     page_id,
                     navigation_id,
@@ -207,12 +184,12 @@ impl Session {
                 }
             }
             BrowserCommand::Resize { page_id, viewport } => {
-                let page = self.pages.entry(page_id).or_default();
+                let page = self.pages.entry(page_id.clone()).or_default();
                 page.viewport = viewport;
                 BrowserEvent::ViewportChanged { page_id, viewport }
             }
             BrowserCommand::Scroll { page_id, delta_y } => {
-                let page = self.pages.entry(page_id).or_default();
+                let page = self.pages.entry(page_id.clone()).or_default();
                 page.scroll_y = (page.scroll_y + delta_y).max(0.0);
                 BrowserEvent::ScrollChanged {
                     page_id,
@@ -223,9 +200,9 @@ impl Session {
     }
 
     #[must_use]
-    pub fn accepts(&self, page_id: PageId, navigation_id: NavigationId) -> bool {
+    pub fn accepts(&self, page_id: &PageId, navigation_id: NavigationId) -> bool {
         self.pages
-            .get(&page_id)
+            .get(page_id)
             .is_some_and(|page| page.navigation_id == navigation_id)
     }
 
@@ -234,11 +211,11 @@ impl Session {
     /// Returns `false` when the page is missing or the result belongs to an older navigation.
     pub fn commit_final_url(
         &mut self,
-        page_id: PageId,
+        page_id: &PageId,
         navigation_id: NavigationId,
         final_url: Url,
     ) -> bool {
-        let Some(page) = self.pages.get_mut(&page_id) else {
+        let Some(page) = self.pages.get_mut(page_id) else {
             return false;
         };
         if page.navigation_id != navigation_id {
@@ -253,7 +230,7 @@ impl Session {
 }
 
 fn start(page_id: PageId, page: &mut PageState, url: Url) -> BrowserEvent {
-    page.navigation_id = page.navigation_id.saturating_add(1);
+    page.navigation_id = page.navigation_id.saturating_next();
     page.scroll_y = 0.0;
     BrowserEvent::NavigationStarted {
         page_id,
@@ -271,19 +248,19 @@ mod tests {
         let mut session = Session::default();
         let page_id = PageId::new();
         let first = session.handle(BrowserCommand::Navigate {
-            page_id,
+            page_id: page_id.clone(),
             url: Url::parse("https://example.com/one").unwrap(),
         });
         let second = session.handle(BrowserCommand::Navigate {
-            page_id,
+            page_id: page_id.clone(),
             url: Url::parse("https://example.com/two").unwrap(),
         });
         let id = |event| match event {
             BrowserEvent::NavigationStarted { navigation_id, .. } => navigation_id,
-            _ => 0,
+            _ => NavigationId::zero(),
         };
-        assert!(!session.accepts(page_id, id(first)));
-        assert!(session.accepts(page_id, id(second)));
+        assert!(!session.accepts(&page_id, id(first)));
+        assert!(session.accepts(&page_id, id(second)));
     }
 
     #[test]
@@ -292,11 +269,13 @@ mod tests {
         let page_id = PageId::new();
         for url in ["https://example.com/one", "https://example.com/two"] {
             let _ = session.handle(BrowserCommand::Navigate {
-                page_id,
+                page_id: page_id.clone(),
                 url: Url::parse(url).unwrap(),
             });
         }
-        let back = session.handle(BrowserCommand::Back { page_id });
+        let back = session.handle(BrowserCommand::Back {
+            page_id: page_id.clone(),
+        });
         let forward = session.handle(BrowserCommand::Forward { page_id });
         assert!(
             matches!(back, BrowserEvent::NavigationStarted { url, .. } if url.path() == "/one")
@@ -310,7 +289,10 @@ mod tests {
     fn restored_page_can_reload_its_current_url() {
         let mut session = Session::default();
         let page_id = PageId::new();
-        session.restore_page(page_id, Url::parse("https://example.com/restored").unwrap());
+        session.restore_page(
+            page_id.clone(),
+            Url::parse("https://example.com/restored").unwrap(),
+        );
         let reload = session.handle(BrowserCommand::Reload { page_id });
         assert!(
             matches!(reload, BrowserEvent::NavigationStarted { url, .. } if url.path() == "/restored")
@@ -321,22 +303,24 @@ mod tests {
     fn final_redirect_url_replaces_current_history_entry() {
         let mut session = Session::default();
         let page_id = PageId::new();
-        session.open_page(page_id);
+        session.open_page(page_id.clone());
         let requested = Url::parse("https://example.test/old").unwrap();
         let final_url = Url::parse("https://example.test/new").unwrap();
         let started = session.handle(BrowserCommand::Navigate {
-            page_id,
+            page_id: page_id.clone(),
             url: requested,
         });
         let BrowserEvent::NavigationStarted { navigation_id, .. } = started else {
             panic!("navigation should start");
         };
-        assert!(session.commit_final_url(page_id, navigation_id, final_url.clone()));
+        assert!(session.commit_final_url(&page_id, navigation_id, final_url.clone()));
         assert_eq!(
-            session.handle(BrowserCommand::Reload { page_id }),
+            session.handle(BrowserCommand::Reload {
+                page_id: page_id.clone(),
+            }),
             BrowserEvent::NavigationStarted {
                 page_id,
-                navigation_id: navigation_id + 1,
+                navigation_id: navigation_id.saturating_next(),
                 url: final_url
             }
         );
@@ -346,21 +330,23 @@ mod tests {
     fn history_availability_tracks_the_cursor() {
         let mut session = Session::default();
         let page_id = PageId::new();
-        assert!(!session.can_go_back(page_id));
-        assert!(!session.can_go_forward(page_id));
+        assert!(!session.can_go_back(&page_id));
+        assert!(!session.can_go_forward(&page_id));
 
         for url in ["https://example.com/one", "https://example.com/two"] {
             let _ = session.handle(BrowserCommand::Navigate {
-                page_id,
+                page_id: page_id.clone(),
                 url: Url::parse(url).unwrap(),
             });
         }
-        assert!(session.can_go_back(page_id));
-        assert!(!session.can_go_forward(page_id));
+        assert!(session.can_go_back(&page_id));
+        assert!(!session.can_go_forward(&page_id));
 
-        let _ = session.handle(BrowserCommand::Back { page_id });
-        assert!(!session.can_go_back(page_id));
-        assert!(session.can_go_forward(page_id));
+        let _ = session.handle(BrowserCommand::Back {
+            page_id: page_id.clone(),
+        });
+        assert!(!session.can_go_back(&page_id));
+        assert!(session.can_go_forward(&page_id));
     }
 
     #[test]
@@ -368,13 +354,15 @@ mod tests {
         let mut session = Session::default();
         let page_id = PageId::new();
         let started = session.handle(BrowserCommand::Navigate {
-            page_id,
+            page_id: page_id.clone(),
             url: Url::parse("https://example.com/slow").unwrap(),
         });
         let BrowserEvent::NavigationStarted { navigation_id, .. } = started else {
             panic!("navigation should start");
         };
-        let stopped = session.handle(BrowserCommand::Stop { page_id });
+        let stopped = session.handle(BrowserCommand::Stop {
+            page_id: page_id.clone(),
+        });
         assert!(matches!(
             stopped,
             BrowserEvent::LoadStageChanged {
@@ -383,6 +371,6 @@ mod tests {
                 ..
             } if stopped_id == navigation_id
         ));
-        assert!(!session.accepts(page_id, navigation_id));
+        assert!(!session.accepts(&page_id, navigation_id));
     }
 }

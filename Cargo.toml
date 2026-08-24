@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
+  "crates/archetype-types",
   "crates/arch-browser",
   "crates/arch-css",
   "crates/arch-dom",

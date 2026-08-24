@@ -1,0 +1,134 @@
+use std::{error::Error, fmt, str::FromStr};
+
+use serde::{Deserialize, Deserializer, Serialize};
+use uuid::{Uuid, Version};
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize)]
+#[serde(transparent)]
+pub struct PageId(String);
+
+impl PageId {
+    #[must_use]
+    pub fn new() -> Self {
+        Self(Uuid::now_v7().to_string())
+    }
+
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl Default for PageId {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl fmt::Display for PageId {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(&self.0)
+    }
+}
+
+impl FromStr for PageId {
+    type Err = ParsePageIdError;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        let uuid = Uuid::parse_str(value).map_err(|_| ParsePageIdError)?;
+        if uuid.get_version() != Some(Version::SortRand) {
+            return Err(ParsePageIdError);
+        }
+        Ok(Self(uuid.to_string()))
+    }
+}
+
+impl<'de> Deserialize<'de> for PageId {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        String::deserialize(deserializer)?
+            .parse()
+            .map_err(serde::de::Error::custom)
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ParsePageIdError;
+
+impl fmt::Display for ParsePageIdError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("invalid UUID v7 page ID")
+    }
+}
+
+impl Error for ParsePageIdError {}
+
+#[derive(
+    Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize,
+)]
+#[serde(transparent)]
+pub struct NavigationId(u64);
+
+impl NavigationId {
+    #[must_use]
+    pub const fn zero() -> Self {
+        Self(0)
+    }
+
+    #[must_use]
+    pub const fn get(self) -> u64 {
+        self.0
+    }
+
+    #[must_use]
+    pub const fn saturating_next(self) -> Self {
+        Self(self.0.saturating_add(1))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn page_id_uses_a_valid_uuid_v7_string() {
+        let page_id = PageId::new();
+        let parsed = Uuid::parse_str(page_id.as_str()).unwrap();
+        assert_eq!(parsed.get_version(), Some(Version::SortRand));
+        assert_eq!(page_id.to_string(), page_id.as_str());
+    }
+
+    #[test]
+    fn page_id_json_is_a_validated_string() {
+        let page_id = PageId::new();
+        let json = serde_json::to_string(&page_id).unwrap();
+        assert_eq!(json, format!("\"{page_id}\""));
+        assert_eq!(serde_json::from_str::<PageId>(&json).unwrap(), page_id);
+        assert!(serde_json::from_str::<PageId>("\"not-a-uuid\"").is_err());
+    }
+
+    #[test]
+    fn page_id_rejects_non_v7_uuids() {
+        assert!(
+            "550e8400-e29b-41d4-a716-446655440000"
+                .parse::<PageId>()
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn navigation_id_has_a_stable_numeric_shape_and_saturates() {
+        let zero = NavigationId::zero();
+        assert_eq!(zero.get(), 0);
+        assert_eq!(serde_json::to_string(&zero).unwrap(), "0");
+        assert_eq!(
+            serde_json::from_str::<NavigationId>("42").unwrap().get(),
+            42
+        );
+
+        let maximum = NavigationId(u64::MAX);
+        assert_eq!(maximum.saturating_next(), maximum);
+    }
+}

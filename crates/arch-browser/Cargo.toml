@@ -8,6 +8,7 @@ rust-version.workspace = true
 
 [dependencies]
 anyhow.workspace = true
+archetype-types = { path = "../archetype-types" }
 arch-css = { path = "../arch-css" }
 arch-dom = { path = "../arch-dom" }
 arch-html = { path = "../arch-html" }
