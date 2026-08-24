@@ -118,9 +118,18 @@ pub type ShutdownReceiver = Receiver<Result<(), RuntimeProcessError>>;
 pub struct RuntimeSupervisor {
     commands: SyncSender<SupervisorCommand>,
     active: Arc<AtomicBool>,
+    command_gate: Arc<Mutex<()>>,
     queued_bytes: Arc<AtomicUsize>,
     terminal_error: Arc<Mutex<Option<RuntimeProcessError>>>,
     limits: RuntimeLimits,
+}
+
+#[derive(Clone)]
+struct SupervisorControl {
+    active: Arc<AtomicBool>,
+    command_gate: Arc<Mutex<()>>,
+    queued_bytes: Arc<AtomicUsize>,
+    terminal_error: Arc<Mutex<Option<RuntimeProcessError>>>,
 }
 
 impl RuntimeSupervisor {
@@ -149,11 +158,15 @@ impl RuntimeSupervisor {
         let (command_sender, command_receiver) = mpsc::sync_channel(COMMAND_QUEUE_LIMIT);
         let (ready_sender, ready_receiver) = mpsc::sync_channel(1);
         let active = Arc::new(AtomicBool::new(true));
-        let supervisor_active = Arc::clone(&active);
+        let command_gate = Arc::new(Mutex::new(()));
         let queued_bytes = Arc::new(AtomicUsize::new(0));
-        let supervisor_queued_bytes = Arc::clone(&queued_bytes);
         let terminal_error = Arc::new(Mutex::new(None));
-        let supervisor_terminal_error = Arc::clone(&terminal_error);
+        let supervisor_control = SupervisorControl {
+            active: Arc::clone(&active),
+            command_gate: Arc::clone(&command_gate),
+            queued_bytes: Arc::clone(&queued_bytes),
+            terminal_error: Arc::clone(&terminal_error),
+        };
         thread::Builder::new()
             .name("archetype-runtime-supervisor".to_owned())
             .spawn(move || {
@@ -161,9 +174,7 @@ impl RuntimeSupervisor {
                     &executable,
                     &command_receiver,
                     &ready_sender,
-                    &supervisor_active,
-                    &supervisor_queued_bytes,
-                    &supervisor_terminal_error,
+                    &supervisor_control,
                     limits,
                 );
             })
@@ -172,6 +183,7 @@ impl RuntimeSupervisor {
             Self {
                 commands: command_sender,
                 active,
+                command_gate,
                 queued_bytes,
                 terminal_error,
                 limits,
@@ -182,6 +194,9 @@ impl RuntimeSupervisor {
 
     #[must_use]
     pub fn render_document(&self, document: StaticDocument) -> RenderReceiver {
+        let Ok(_command_gate) = self.command_gate.lock() else {
+            return completed(RuntimeProcessError::RuntimeDisconnected);
+        };
         if !self.active.load(Ordering::Acquire) {
             return completed(self.inactive_error());
         }
@@ -217,6 +232,9 @@ impl RuntimeSupervisor {
 
     #[must_use]
     pub fn shutdown(&self) -> ShutdownReceiver {
+        let Ok(_command_gate) = self.command_gate.lock() else {
+            return completed(RuntimeProcessError::RuntimeDisconnected);
+        };
         if !self.active.load(Ordering::Acquire) {
             return completed(self.inactive_error());
         }
@@ -245,6 +263,9 @@ impl RuntimeSupervisor {
 
 impl Drop for RuntimeSupervisor {
     fn drop(&mut self) {
+        let Ok(_command_gate) = self.command_gate.lock() else {
+            return;
+        };
         let (completion, _) = mpsc::sync_channel(1);
         let _ = self
             .commands
@@ -364,21 +385,21 @@ fn supervise(
     executable: &Path,
     commands: &Receiver<SupervisorCommand>,
     ready: &SyncSender<Result<(), RuntimeProcessError>>,
-    active: &AtomicBool,
-    queued_bytes: &AtomicUsize,
-    terminal_error: &Mutex<Option<RuntimeProcessError>>,
+    control: &SupervisorControl,
     limits: RuntimeLimits,
 ) {
     let (mut child, mut input, responses, reader) = match start_child(executable) {
         Ok(process) => process,
         Err(error) => {
-            active.store(false, Ordering::Release);
+            record_terminal_error(&control.terminal_error, error.clone());
+            deactivate(control, commands, &error);
             let _ = ready.send(Err(error));
             return;
         }
     };
     if let Err(error) = perform_handshake(&mut input, &responses) {
-        active.store(false, Ordering::Release);
+        record_terminal_error(&control.terminal_error, error.clone());
+        deactivate(control, commands, &error);
         let _ = ready.send(Err(error));
         terminate(&mut child, reader);
         return;
@@ -403,7 +424,7 @@ fn supervise(
                     resource: "RSS".to_owned(),
                 };
                 connection.fail_pending(&error);
-                record_terminal_error(terminal_error, error);
+                record_terminal_error(&control.terminal_error, error);
                 break;
             }
         }
@@ -413,29 +434,37 @@ fn supervise(
                 reserved_bytes,
                 completion,
             }) => {
-                queued_bytes.fetch_sub(reserved_bytes, Ordering::AcqRel);
+                control
+                    .queued_bytes
+                    .fetch_sub(reserved_bytes, Ordering::AcqRel);
                 if let Err(error) = connection.queue_render(document, completion) {
                     connection.fail_pending(&error);
                     break;
                 }
             }
             Ok(SupervisorCommand::Shutdown(completion)) => {
-                active.store(false, Ordering::Release);
                 connection.fail_pending(&RuntimeProcessError::RuntimeDisconnected);
+                deactivate(control, commands, &RuntimeProcessError::RuntimeDisconnected);
                 terminate(&mut child, reader);
                 let _ = completion.send(Ok(()));
                 return;
             }
             Err(RecvTimeoutError::Timeout) => {}
             Err(RecvTimeoutError::Disconnected) => {
-                active.store(false, Ordering::Release);
+                control.active.store(false, Ordering::Release);
                 connection.fail_pending(&RuntimeProcessError::RuntimeDisconnected);
                 terminate(&mut child, reader);
                 return;
             }
         }
     }
-    active.store(false, Ordering::Release);
+    let error = control
+        .terminal_error
+        .lock()
+        .ok()
+        .and_then(|error| error.clone())
+        .unwrap_or(RuntimeProcessError::RuntimeDisconnected);
+    deactivate(control, commands, &error);
     terminate(&mut child, reader);
 }
 
@@ -682,6 +711,35 @@ fn record_terminal_error(
 ) {
     if let Ok(mut terminal_error) = terminal_error.lock() {
         *terminal_error = Some(error);
+    }
+}
+
+fn deactivate(
+    control: &SupervisorControl,
+    commands: &Receiver<SupervisorCommand>,
+    error: &RuntimeProcessError,
+) {
+    let Ok(_command_gate) = control.command_gate.lock() else {
+        control.active.store(false, Ordering::Release);
+        return;
+    };
+    control.active.store(false, Ordering::Release);
+    for command in commands.try_iter() {
+        match command {
+            SupervisorCommand::Render {
+                reserved_bytes,
+                completion,
+                ..
+            } => {
+                control
+                    .queued_bytes
+                    .fetch_sub(reserved_bytes, Ordering::AcqRel);
+                let _ = completion.send(Err(error.clone()));
+            }
+            SupervisorCommand::Shutdown(completion) => {
+                let _ = completion.send(Err(error.clone()));
+            }
+        }
     }
 }
 
