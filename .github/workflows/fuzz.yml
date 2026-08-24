@@ -11,6 +11,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@nightly
+        with:
+          targets: x86_64-apple-darwin
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-fuzz
