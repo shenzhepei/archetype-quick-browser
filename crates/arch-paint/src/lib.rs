@@ -52,10 +52,11 @@ pub struct DisplayList {
 
 #[must_use]
 pub fn paint(tree: &LayoutTree) -> DisplayList {
+    let mut boxes = tree.boxes.iter().collect::<Vec<_>>();
+    boxes.sort_by_key(|item| (item.z_index, item.paint_order));
     DisplayList {
-        commands: tree
-            .boxes
-            .iter()
+        commands: boxes
+            .into_iter()
             .flat_map(|item| {
                 let background = item.background_color.as_deref().and_then(parse_color);
                 let border = item.border_color.as_deref().and_then(parse_color);
@@ -167,6 +168,8 @@ mod tests {
                 border_color: Some("blue".to_owned()),
                 border_width_px: 1.0,
                 text_align: TextAlign::Start,
+                z_index: 0,
+                paint_order: 0,
             }],
             content_height: 40.0,
         };
@@ -208,5 +211,49 @@ mod tests {
                 ..
             }, _] if (*border_width_px - 1.0).abs() < f32::EPSILON
         ));
+    }
+
+    #[test]
+    fn orders_boxes_by_z_index_then_document_order() {
+        let layout_box = |node, z_index, paint_order, color: &str| LayoutBox {
+            node_id: NodeId(node),
+            bounds: Rect::default(),
+            clip: None,
+            text: None,
+            image: None,
+            link: None,
+            font_size_px: 16.0,
+            font_family: None,
+            color: None,
+            line_height_px: 20.0,
+            white_space: WhiteSpace::Normal,
+            font_weight: FontWeight::Normal,
+            font_style: FontStyle::Normal,
+            background_color: Some(color.to_owned()),
+            border_color: None,
+            border_width_px: 0.0,
+            text_align: TextAlign::Start,
+            z_index,
+            paint_order,
+        };
+        let tree = LayoutTree {
+            boxes: vec![
+                layout_box(1, 2, 0, "red"),
+                layout_box(2, -1, 1, "blue"),
+                layout_box(3, 2, 2, "green"),
+            ],
+            content_height: 0.0,
+        };
+        let colors = paint(&tree)
+            .commands
+            .iter()
+            .filter_map(|command| match command {
+                DisplayCommand::Box { background, .. } => *background,
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(colors[0], parse_color("blue").unwrap());
+        assert_eq!(colors[1], parse_color("red").unwrap());
+        assert_eq!(colors[2], parse_color("green").unwrap());
     }
 }

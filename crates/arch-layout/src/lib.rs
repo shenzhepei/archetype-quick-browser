@@ -6,7 +6,7 @@ use std::{
 use arch_dom::{Document, NodeId, NodeKind};
 use arch_style::{
     BoxSizing, ComputedLength, Display, FlexAlign, FlexDirection, FlexJustify, FlexWrap, FontStyle,
-    FontWeight, Overflow, StyledNode, TextAlign, WhiteSpace,
+    FontWeight, Overflow, Position, StyledNode, TextAlign, WhiteSpace,
 };
 use serde::{Deserialize, Serialize};
 
@@ -37,6 +37,8 @@ pub struct LayoutBox {
     pub border_color: Option<String>,
     pub border_width_px: f32,
     pub text_align: TextAlign,
+    pub z_index: i32,
+    pub paint_order: usize,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -62,6 +64,18 @@ pub fn layout<S: BuildHasher>(
     images: &HashMap<NodeId, ImageBox, S>,
     links: &HashMap<NodeId, String, S>,
 ) -> LayoutTree {
+    layout_with_viewport(document, styled, viewport_width, 900.0, images, links)
+}
+
+#[must_use]
+pub fn layout_with_viewport<S: BuildHasher>(
+    document: &Document,
+    styled: &[StyledNode],
+    viewport_width: f32,
+    viewport_height: f32,
+    images: &HashMap<NodeId, ImageBox, S>,
+    links: &HashMap<NodeId, String, S>,
+) -> LayoutTree {
     let style_by_node: HashMap<_, _> = styled
         .iter()
         .map(|node| (node.node_id, &node.style))
@@ -73,9 +87,32 @@ pub fn layout<S: BuildHasher>(
         links,
         hidden: HashSet::new(),
         tree: LayoutTree::default(),
+        pending_absolute: Vec::new(),
+        viewport: Rect {
+            x: 0.0,
+            y: 0.0,
+            width: viewport_width,
+            height: viewport_height,
+        },
     };
     let mut cursor_y = 0.0;
-    context.layout_node(document.root(), 0.0, viewport_width, None, &mut cursor_y);
+    context.layout_node(
+        document.root(),
+        ContainingBlock {
+            x: 0.0,
+            width: viewport_width,
+            height: None,
+            positioned_ancestor: None,
+        },
+        false,
+        &mut cursor_y,
+    );
+    let mut pending_index = 0;
+    while pending_index < context.pending_absolute.len() {
+        let (node_id, positioned_ancestor) = context.pending_absolute[pending_index];
+        context.layout_absolute_node(node_id, positioned_ancestor);
+        pending_index += 1;
+    }
     context.tree.content_height = cursor_y;
     context.tree
 }
@@ -87,6 +124,8 @@ struct LayoutContext<'a, S> {
     links: &'a HashMap<NodeId, String, S>,
     hidden: HashSet<NodeId>,
     tree: LayoutTree,
+    pending_absolute: Vec<(NodeId, Option<NodeId>)>,
+    viewport: Rect,
 }
 
 #[derive(Clone, Copy)]
@@ -95,6 +134,8 @@ struct FlexSeed {
     basis: f32,
     grow: f32,
     shrink: f32,
+    order: i32,
+    document_order: usize,
 }
 
 struct FlexItem {
@@ -102,6 +143,20 @@ struct FlexItem {
     end: usize,
     x: f32,
     height: f32,
+}
+
+#[derive(Clone, Copy)]
+struct ContainingBlock {
+    x: f32,
+    width: f32,
+    height: Option<f32>,
+    positioned_ancestor: Option<NodeId>,
+}
+
+struct InlineFlow<'a> {
+    cursor_y: &'a mut f32,
+    x: f32,
+    line_height: f32,
 }
 
 fn gap_count(item_count: usize) -> f32 {
@@ -158,9 +213,8 @@ impl<S: BuildHasher> LayoutContext<'_, S> {
     fn layout_node(
         &mut self,
         node_id: NodeId,
-        containing_x: f32,
-        containing_width: f32,
-        containing_height: Option<f32>,
+        containing: ContainingBlock,
+        allow_absolute_root: bool,
         cursor_y: &mut f32,
     ) {
         let Some(node) = self.document.node(node_id) else {
@@ -176,15 +230,17 @@ impl<S: BuildHasher> LayoutContext<'_, S> {
             self.hidden.insert(node.id);
             return;
         }
-        let text = match &node.kind {
-            NodeKind::Text(text) if !text.trim().is_empty() => Some(match style.white_space {
-                WhiteSpace::Pre | WhiteSpace::PreWrap => text.clone(),
-                WhiteSpace::Normal | WhiteSpace::NoWrap => {
-                    text.split_whitespace().collect::<Vec<_>>().join(" ")
-                }
-            }),
-            _ => None,
+        if style.position == Position::Absolute && !allow_absolute_root {
+            self.pending_absolute
+                .push((node.id, containing.positioned_ancestor));
+            return;
+        }
+        let positioned_ancestor = if style.position == Position::Static {
+            containing.positioned_ancestor
+        } else {
+            Some(node.id)
         };
+        let text = normalized_text(&node.kind, style.white_space);
         let image = self.images.get(&node.id).cloned();
         let form_dimensions = form_control_dimensions(&node.kind);
         let creates_box = matches!(style.display, Display::Block | Display::Flex)
@@ -194,54 +250,38 @@ impl<S: BuildHasher> LayoutContext<'_, S> {
         if creates_box {
             let horizontal_edges = style.padding.left + style.padding.right + style.border_px * 2.0;
             let vertical_edges = style.padding.top + style.padding.bottom + style.border_px * 2.0;
-            let width = resolve_box_width(style, containing_width);
+            let width = resolve_box_width(style, containing.width);
             let content_width = (width - horizontal_edges).max(0.0);
             let own_content_height = form_dimensions.map_or_else(
                 || intrinsic_content_height(style, image.as_ref(), text.as_deref(), content_width),
                 |(_, height)| height,
             );
-            let x = containing_x + style.margin.left;
+            let x = containing.x + style.margin.left;
             let y = *cursor_y + style.margin.top;
-            let box_index = self.tree.boxes.len();
             let bounds = Rect {
                 x,
                 y,
                 width,
                 height: 0.0,
             };
-            self.tree.boxes.push(LayoutBox {
-                node_id: node.id,
-                bounds,
-                clip: None,
-                text,
-                image,
-                link: self.links.get(&node.id).cloned(),
-                font_size_px: style.font_size_px,
-                font_family: style.font_family.clone(),
-                color: style.color.clone(),
-                line_height_px: style.line_height_px,
-                white_space: style.white_space,
-                font_weight: style.font_weight,
-                font_style: style.font_style,
-                background_color: style.background_color.clone(),
-                border_color: style.border_color.clone(),
-                border_width_px: style.border_px,
-                text_align: style.text_align,
-            });
+            let box_index = self.push_layout_box(node.id, bounds, text, image, style);
             let content_x = x + style.padding.left + style.border_px;
             let content_y = y + style.padding.top + style.border_px;
             let mut child_cursor = content_y + own_content_height;
             let specified_height = style
                 .height
-                .and_then(|value| resolve_height(value, containing_height))
+                .and_then(|value| resolve_height(value, containing.height))
                 .map(|value| box_height(style, value));
             let child_containing_height =
                 specified_height.map(|height| (height - vertical_edges).max(0.0));
             self.layout_container_children(
                 &node.children,
-                content_x,
-                content_width,
-                child_containing_height,
+                ContainingBlock {
+                    x: content_x,
+                    width: content_width,
+                    height: child_containing_height,
+                    positioned_ancestor,
+                },
                 style,
                 &mut child_cursor,
             );
@@ -251,39 +291,69 @@ impl<S: BuildHasher> LayoutContext<'_, S> {
             self.tree.boxes[box_index].bounds.height = height;
             self.clip_descendants(box_index, style.overflow, style.border_px);
             *cursor_y = y + height + style.margin.bottom;
+            if style.position != Position::Static && style.z_index != 0 {
+                for layout_box in &mut self.tree.boxes[box_index..] {
+                    if layout_box.z_index == 0 {
+                        layout_box.z_index = style.z_index;
+                    }
+                }
+            }
+            if style.position == Position::Relative {
+                let dx = relative_offset(style.left, style.right, containing.width);
+                let dy = relative_offset(style.top, style.bottom, containing.height.unwrap_or(0.0));
+                self.shift_boxes(box_index, self.tree.boxes.len(), dx, dy);
+            }
         } else {
             for child in &node.children {
-                self.layout_node(
-                    *child,
-                    containing_x,
-                    containing_width,
-                    containing_height,
-                    cursor_y,
-                );
+                self.layout_node(*child, containing, false, cursor_y);
             }
         }
+    }
+
+    fn push_layout_box(
+        &mut self,
+        node_id: NodeId,
+        bounds: Rect,
+        text: Option<String>,
+        image: Option<ImageBox>,
+        style: &arch_style::ComputedStyle,
+    ) -> usize {
+        let box_index = self.tree.boxes.len();
+        self.tree.boxes.push(LayoutBox {
+            node_id,
+            bounds,
+            clip: None,
+            text,
+            image,
+            link: self.links.get(&node_id).cloned(),
+            font_size_px: style.font_size_px,
+            font_family: style.font_family.clone(),
+            color: style.color.clone(),
+            line_height_px: style.line_height_px,
+            white_space: style.white_space,
+            font_weight: style.font_weight,
+            font_style: style.font_style,
+            background_color: style.background_color.clone(),
+            border_color: style.border_color.clone(),
+            border_width_px: style.border_px,
+            text_align: style.text_align,
+            z_index: style.z_index,
+            paint_order: box_index,
+        });
+        box_index
     }
 
     fn layout_container_children(
         &mut self,
         children: &[NodeId],
-        content_x: f32,
-        content_width: f32,
-        content_height: Option<f32>,
+        containing: ContainingBlock,
         style: &arch_style::ComputedStyle,
         cursor_y: &mut f32,
     ) {
         if style.display == Display::Flex {
-            self.layout_flex_children(
-                children,
-                content_x,
-                content_width,
-                content_height,
-                style,
-                cursor_y,
-            );
+            self.layout_flex_children(children, containing, style, cursor_y);
         } else {
-            self.layout_children(children, content_x, content_width, content_height, cursor_y);
+            self.layout_children(children, containing, cursor_y);
         }
     }
 
@@ -304,13 +374,14 @@ impl<S: BuildHasher> LayoutContext<'_, S> {
     fn layout_children(
         &mut self,
         children: &[NodeId],
-        content_x: f32,
-        content_width: f32,
-        content_height: Option<f32>,
+        containing: ContainingBlock,
         cursor_y: &mut f32,
     ) {
-        let mut inline_x = 0.0_f32;
-        let mut line_height = 0.0_f32;
+        let mut flow = InlineFlow {
+            cursor_y,
+            x: 0.0,
+            line_height: 0.0,
+        };
         for child_id in children {
             let Some(style) = self.style_by_node.get(child_id).copied() else {
                 continue;
@@ -320,40 +391,25 @@ impl<S: BuildHasher> LayoutContext<'_, S> {
                 continue;
             }
             if matches!(style.display, Display::Block | Display::Flex) {
-                if line_height > 0.0 {
-                    *cursor_y += line_height;
-                    inline_x = 0.0;
-                    line_height = 0.0;
+                if flow.line_height > 0.0 {
+                    *flow.cursor_y += flow.line_height;
+                    flow.x = 0.0;
+                    flow.line_height = 0.0;
                 }
-                self.layout_node(
-                    *child_id,
-                    content_x,
-                    content_width,
-                    content_height,
-                    cursor_y,
-                );
+                self.layout_node(*child_id, containing, false, flow.cursor_y);
                 continue;
             }
-            self.layout_inline_subtree(
-                *child_id,
-                content_x,
-                content_width,
-                cursor_y,
-                &mut inline_x,
-                &mut line_height,
-            );
+            self.layout_inline_subtree(*child_id, containing, &mut flow);
         }
-        if line_height > 0.0 {
-            *cursor_y += line_height;
+        if flow.line_height > 0.0 {
+            *flow.cursor_y += flow.line_height;
         }
     }
 
     fn layout_flex_children(
         &mut self,
         children: &[NodeId],
-        content_x: f32,
-        content_width: f32,
-        content_height: Option<f32>,
+        containing: ContainingBlock,
         container_style: &arch_style::ComputedStyle,
         cursor_y: &mut f32,
     ) {
@@ -361,33 +417,35 @@ impl<S: BuildHasher> LayoutContext<'_, S> {
             container_style.flex_direction,
             FlexDirection::Column | FlexDirection::ColumnReverse
         ) {
-            self.layout_flex_column(
-                children,
-                content_x,
-                content_width,
-                content_height,
-                container_style,
-                cursor_y,
-            );
+            self.layout_flex_column(children, containing, container_style, cursor_y);
             return;
         }
 
         let mut seeds: Vec<_> = children
             .iter()
-            .filter_map(|node_id| {
+            .enumerate()
+            .filter_map(|(document_order, node_id)| {
                 let style = self.style_by_node.get(node_id).copied()?;
                 if style.display == Display::None {
                     self.hidden.insert(*node_id);
                     return None;
                 }
+                if style.position == Position::Absolute {
+                    self.pending_absolute
+                        .push((*node_id, containing.positioned_ancestor));
+                    return None;
+                }
                 Some(FlexSeed {
                     node_id: *node_id,
-                    basis: self.flex_basis(*node_id, style, content_width),
+                    basis: self.flex_basis(*node_id, style, containing.width),
                     grow: style.flex_grow,
                     shrink: style.flex_shrink,
+                    order: style.order,
+                    document_order,
                 })
             })
             .collect();
+        seeds.sort_by_key(|seed| (seed.order, seed.document_order));
         if container_style.flex_direction == FlexDirection::RowReverse {
             seeds.reverse();
         }
@@ -399,7 +457,7 @@ impl<S: BuildHasher> LayoutContext<'_, S> {
                     let used: f32 = line.iter().map(|item| item.basis).sum::<f32>()
                         + container_style.column_gap * gap_count(line.len());
                     !line.is_empty()
-                        && used + container_style.column_gap + seed.basis > content_width
+                        && used + container_style.column_gap + seed.basis > containing.width
                 });
             if lines.is_empty() || wraps {
                 lines.push(Vec::new());
@@ -409,47 +467,8 @@ impl<S: BuildHasher> LayoutContext<'_, S> {
 
         let has_lines = !lines.is_empty();
         for line in lines {
-            let sizes = flex_main_sizes(&line, content_width, container_style.column_gap);
-            let occupied =
-                sizes.iter().sum::<f32>() + container_style.column_gap * gap_count(sizes.len());
-            let (mut main_offset, between) = justify_offsets(
-                container_style.justify_content,
-                (content_width - occupied).max(0.0),
-                line.len(),
-                container_style.column_gap,
-            );
-            let line_y = *cursor_y;
-            let mut items = Vec::new();
-            for (seed, size) in line.iter().zip(sizes) {
-                let start = self.tree.boxes.len();
-                let mut temporary_y = 0.0;
-                self.layout_node(seed.node_id, 0.0, size, content_height, &mut temporary_y);
-                let end = self.tree.boxes.len();
-                if start == end {
-                    continue;
-                }
-                self.tree.boxes[start].bounds.width = size;
-                let height = self.tree.boxes[start].bounds.height;
-                items.push(FlexItem {
-                    start,
-                    end,
-                    x: content_x + main_offset,
-                    height,
-                });
-                main_offset += size + between;
-            }
-            let line_height = items.iter().map(|item| item.height).fold(0.0_f32, f32::max);
-            for item in items {
-                let align_offset = match container_style.align_items {
-                    FlexAlign::Center => (line_height - item.height) / 2.0,
-                    FlexAlign::End => line_height - item.height,
-                    FlexAlign::Start | FlexAlign::Stretch => 0.0,
-                };
-                self.move_boxes(item.start, item.end, item.x, line_y + align_offset);
-                if container_style.align_items == FlexAlign::Stretch {
-                    self.tree.boxes[item.start].bounds.height = line_height;
-                }
-            }
+            let line_height =
+                self.layout_flex_row_line(&line, containing, container_style, *cursor_y);
             *cursor_y += line_height + container_style.row_gap;
         }
         if has_lines {
@@ -457,55 +476,148 @@ impl<S: BuildHasher> LayoutContext<'_, S> {
         }
     }
 
+    fn layout_flex_row_line(
+        &mut self,
+        line: &[FlexSeed],
+        containing: ContainingBlock,
+        container_style: &arch_style::ComputedStyle,
+        line_y: f32,
+    ) -> f32 {
+        let sizes = flex_main_sizes(line, containing.width, container_style.column_gap);
+        let occupied =
+            sizes.iter().sum::<f32>() + container_style.column_gap * gap_count(sizes.len());
+        let (mut main_offset, between) = justify_offsets(
+            container_style.justify_content,
+            (containing.width - occupied).max(0.0),
+            line.len(),
+            container_style.column_gap,
+        );
+        let mut items = Vec::new();
+        for (seed, size) in line.iter().zip(sizes) {
+            let start = self.tree.boxes.len();
+            let mut temporary_y = 0.0;
+            self.layout_node(
+                seed.node_id,
+                ContainingBlock {
+                    x: 0.0,
+                    width: size,
+                    ..containing
+                },
+                false,
+                &mut temporary_y,
+            );
+            let end = self.tree.boxes.len();
+            if start == end {
+                continue;
+            }
+            self.tree.boxes[start].bounds.width = size;
+            let height = self.tree.boxes[start].bounds.height;
+            items.push(FlexItem {
+                start,
+                end,
+                x: containing.x + main_offset,
+                height,
+            });
+            main_offset += size + between;
+        }
+        let line_height = items.iter().map(|item| item.height).fold(0.0_f32, f32::max);
+        for item in items {
+            let align_offset = match container_style.align_items {
+                FlexAlign::Center => (line_height - item.height) / 2.0,
+                FlexAlign::End => line_height - item.height,
+                FlexAlign::Start | FlexAlign::Stretch => 0.0,
+            };
+            self.move_boxes(item.start, item.end, item.x, line_y + align_offset);
+            if container_style.align_items == FlexAlign::Stretch {
+                self.tree.boxes[item.start].bounds.height = line_height;
+            }
+        }
+        line_height
+    }
+
     fn layout_flex_column(
         &mut self,
         children: &[NodeId],
-        content_x: f32,
-        content_width: f32,
-        content_height: Option<f32>,
+        containing: ContainingBlock,
         container_style: &arch_style::ComputedStyle,
         cursor_y: &mut f32,
     ) {
-        let mut ordered = children.to_vec();
+        let mut ordered = children
+            .iter()
+            .enumerate()
+            .filter_map(|(document_order, node_id)| {
+                let style = self.style_by_node.get(node_id).copied()?;
+                if style.position == Position::Absolute {
+                    self.pending_absolute
+                        .push((*node_id, containing.positioned_ancestor));
+                    return None;
+                }
+                (style.display != Display::None).then_some((style.order, document_order, *node_id))
+            })
+            .collect::<Vec<_>>();
+        ordered.sort_by_key(|(order, document_order, _)| (*order, *document_order));
         if container_style.flex_direction == FlexDirection::ColumnReverse {
             ordered.reverse();
         }
         let start_y = *cursor_y;
         let mut items = Vec::new();
-        for node_id in ordered {
+        for (_, _, node_id) in ordered {
             let start = self.tree.boxes.len();
-            self.layout_node(node_id, content_x, content_width, content_height, cursor_y);
+            self.layout_node(node_id, containing, false, cursor_y);
             let end = self.tree.boxes.len();
             if start < end {
-                items.push((start, end));
-                *cursor_y += container_style.row_gap;
+                let style = self.style_by_node[&node_id];
+                let natural = self.tree.boxes[start].bounds.height;
+                let basis = style
+                    .flex_basis
+                    .and_then(|basis| resolve_height(basis, containing.height))
+                    .unwrap_or(natural);
+                items.push((start, end, basis, style.flex_grow, style.flex_shrink));
             }
         }
-        if !items.is_empty() {
-            *cursor_y -= container_style.row_gap;
-        }
-        let occupied = *cursor_y - start_y;
-        let free = content_height.map_or(0.0, |height| (height - occupied).max(0.0));
-        let (offset, extra_gap) = justify_offsets(
+        let seeds = items
+            .iter()
+            .map(|(_, _, basis, grow, shrink)| FlexSeed {
+                node_id: NodeId(0),
+                basis: *basis,
+                grow: *grow,
+                shrink: *shrink,
+                order: 0,
+                document_order: 0,
+            })
+            .collect::<Vec<_>>();
+        let available = containing.height.unwrap_or_else(|| {
+            seeds.iter().map(|seed| seed.basis).sum::<f32>()
+                + container_style.row_gap * gap_count(seeds.len())
+        });
+        let sizes = flex_main_sizes(&seeds, available, container_style.row_gap);
+        let occupied = sizes.iter().sum::<f32>() + container_style.row_gap * gap_count(sizes.len());
+        let (offset, between) = justify_offsets(
             container_style.justify_content,
-            free,
+            (available - occupied).max(0.0),
             items.len(),
             container_style.row_gap,
         );
-        let mut accumulated = offset;
-        for (start, end) in items {
+        let mut item_y = start_y + offset;
+        for ((start, end, _, _, _), size) in items.into_iter().zip(sizes) {
             let root = self.tree.boxes[start].bounds;
             let cross_offset = match container_style.align_items {
-                FlexAlign::Center => (content_width - root.width).max(0.0) / 2.0,
-                FlexAlign::End => (content_width - root.width).max(0.0),
+                FlexAlign::Center => (containing.width - root.width).max(0.0) / 2.0,
+                FlexAlign::End => (containing.width - root.width).max(0.0),
                 FlexAlign::Start | FlexAlign::Stretch => 0.0,
             };
-            self.shift_boxes(start, end, cross_offset, accumulated);
-            if extra_gap > container_style.row_gap {
-                accumulated += extra_gap - container_style.row_gap;
+            self.move_boxes(start, end, root.x + cross_offset, item_y);
+            self.tree.boxes[start].bounds.height = size;
+            if container_style.align_items == FlexAlign::Stretch {
+                self.tree.boxes[start].bounds.width = containing.width;
             }
+            item_y += size + between;
         }
-        *cursor_y += offset;
+        *cursor_y = if seeds.is_empty() {
+            start_y
+        } else {
+            item_y - between
+        };
     }
 
     fn flex_basis(
@@ -514,6 +626,9 @@ impl<S: BuildHasher> LayoutContext<'_, S> {
         style: &arch_style::ComputedStyle,
         content_width: f32,
     ) -> f32 {
+        if let Some(basis) = style.flex_basis {
+            return resolve(basis, content_width).min(content_width);
+        }
         if style.width.is_some() {
             return resolve_box_width(style, content_width).min(content_width);
         }
@@ -528,6 +643,63 @@ impl<S: BuildHasher> LayoutContext<'_, S> {
             .min(content_width)
     }
 
+    fn layout_absolute_node(&mut self, node_id: NodeId, positioned_ancestor: Option<NodeId>) {
+        let Some(style) = self.style_by_node.get(&node_id).copied().cloned() else {
+            return;
+        };
+        let containing_block = positioned_ancestor
+            .and_then(|ancestor| {
+                let bounds = self
+                    .tree
+                    .boxes
+                    .iter()
+                    .find(|layout_box| layout_box.node_id == ancestor)?
+                    .bounds;
+                let ancestor_style = self.style_by_node.get(&ancestor).copied()?;
+                Some(content_rect(bounds, ancestor_style))
+            })
+            .unwrap_or(self.viewport);
+        let start = self.tree.boxes.len();
+        let mut cursor_y = containing_block.y;
+        self.layout_node(
+            node_id,
+            ContainingBlock {
+                x: containing_block.x,
+                width: containing_block.width,
+                height: Some(containing_block.height),
+                positioned_ancestor,
+            },
+            true,
+            &mut cursor_y,
+        );
+        let end = self.tree.boxes.len();
+        if start == end {
+            return;
+        }
+        let root = self.tree.boxes[start].bounds;
+        let x = if let Some(left) = style.left {
+            containing_block.x + resolve_offset(left, containing_block.width) + style.margin.left
+        } else if let Some(right) = style.right {
+            containing_block.x + containing_block.width
+                - resolve_offset(right, containing_block.width)
+                - root.width
+                - style.margin.right
+        } else {
+            root.x
+        };
+        let y = if let Some(top) = style.top {
+            containing_block.y + resolve_offset(top, containing_block.height) + style.margin.top
+        } else if let Some(bottom) = style.bottom {
+            containing_block.y + containing_block.height
+                - resolve_offset(bottom, containing_block.height)
+                - root.height
+                - style.margin.bottom
+        } else {
+            root.y
+        };
+        self.move_boxes(start, end, x, y);
+    }
+
     fn move_boxes(&mut self, start: usize, end: usize, x: f32, y: f32) {
         let root = self.tree.boxes[start].bounds;
         self.shift_boxes(start, end, x - root.x, y - root.y);
@@ -537,17 +709,18 @@ impl<S: BuildHasher> LayoutContext<'_, S> {
         for layout_box in &mut self.tree.boxes[start..end] {
             layout_box.bounds.x += dx;
             layout_box.bounds.y += dy;
+            if let Some(clip) = &mut layout_box.clip {
+                clip.x += dx;
+                clip.y += dy;
+            }
         }
     }
 
     fn layout_inline_subtree(
         &mut self,
         node_id: NodeId,
-        content_x: f32,
-        content_width: f32,
-        cursor_y: &mut f32,
-        inline_x: &mut f32,
-        line_height: &mut f32,
+        containing: ContainingBlock,
+        flow: &mut InlineFlow<'_>,
     ) {
         let Some(node) = self.document.node(node_id) else {
             return;
@@ -559,21 +732,18 @@ impl<S: BuildHasher> LayoutContext<'_, S> {
             self.hidden.insert(node_id);
             return;
         }
-        if matches!(&node.kind, NodeKind::Element(element) if element.name == "br") {
-            *cursor_y += (*line_height).max(style.line_height_px);
-            *inline_x = 0.0;
-            *line_height = 0.0;
+        if style.position == Position::Absolute {
+            self.pending_absolute
+                .push((node_id, containing.positioned_ancestor));
             return;
         }
-        let text = match &node.kind {
-            NodeKind::Text(value) if !value.trim().is_empty() => Some(match style.white_space {
-                WhiteSpace::Pre | WhiteSpace::PreWrap => value.clone(),
-                WhiteSpace::Normal | WhiteSpace::NoWrap => {
-                    value.split_whitespace().collect::<Vec<_>>().join(" ")
-                }
-            }),
-            _ => None,
-        };
+        if matches!(&node.kind, NodeKind::Element(element) if element.name == "br") {
+            *flow.cursor_y += flow.line_height.max(style.line_height_px);
+            flow.x = 0.0;
+            flow.line_height = 0.0;
+            return;
+        }
+        let text = normalized_text(&node.kind, style.white_space);
         let image = self.images.get(&node_id).cloned();
         let form_dimensions = form_control_dimensions(&node.kind);
         if text.is_some() || image.is_some() || form_dimensions.is_some() {
@@ -589,14 +759,14 @@ impl<S: BuildHasher> LayoutContext<'_, S> {
             };
             let aligned_line = text.is_some() && style.text_align != TextAlign::Start;
             let run_width = if aligned_line {
-                content_width
+                containing.width
             } else {
-                intrinsic_width.min(content_width).max(1.0)
+                intrinsic_width.min(containing.width).max(1.0)
             };
-            if *inline_x > 0.0 && *inline_x + run_width > content_width {
-                *cursor_y += (*line_height).max(1.0);
-                *inline_x = 0.0;
-                *line_height = 0.0;
+            if flow.x > 0.0 && flow.x + run_width > containing.width {
+                *flow.cursor_y += flow.line_height.max(1.0);
+                flow.x = 0.0;
+                flow.line_height = 0.0;
             }
             let run_height = if let Some(value) = &text {
                 let chars_per_line = (run_width / (style.font_size_px * 0.55)).max(1.0);
@@ -609,45 +779,36 @@ impl<S: BuildHasher> LayoutContext<'_, S> {
             } else {
                 style.line_height_px
             };
-            self.tree.boxes.push(LayoutBox {
-                node_id,
-                bounds: Rect {
-                    x: content_x + *inline_x,
-                    y: *cursor_y,
-                    width: run_width,
-                    height: run_height,
-                },
-                clip: None,
-                text,
-                image,
-                link: self.links.get(&node_id).cloned(),
-                font_size_px: style.font_size_px,
-                font_family: style.font_family.clone(),
-                color: style.color.clone(),
-                line_height_px: style.line_height_px,
-                white_space: style.white_space,
-                font_weight: style.font_weight,
-                font_style: style.font_style,
-                background_color: style.background_color.clone(),
-                border_color: style.border_color.clone(),
-                border_width_px: style.border_px,
-                text_align: style.text_align,
-            });
-            *inline_x += run_width;
-            *line_height = (*line_height).max(run_height);
+            let bounds = Rect {
+                x: containing.x + flow.x,
+                y: *flow.cursor_y,
+                width: run_width,
+                height: run_height,
+            };
+            self.push_layout_box(node_id, bounds, text, image, style);
+            flow.x += run_width;
+            flow.line_height = flow.line_height.max(run_height);
             return;
         }
         for child in &node.children {
-            self.layout_inline_subtree(
-                *child,
-                content_x,
-                content_width,
-                cursor_y,
-                inline_x,
-                line_height,
-            );
+            self.layout_inline_subtree(*child, containing, flow);
         }
     }
+}
+
+fn normalized_text(kind: &NodeKind, white_space: WhiteSpace) -> Option<String> {
+    let NodeKind::Text(value) = kind else {
+        return None;
+    };
+    if value.trim().is_empty() {
+        return None;
+    }
+    Some(match white_space {
+        WhiteSpace::Pre | WhiteSpace::PreWrap => value.clone(),
+        WhiteSpace::Normal | WhiteSpace::NoWrap => {
+            value.split_whitespace().collect::<Vec<_>>().join(" ")
+        }
+    })
 }
 
 fn form_control_dimensions(kind: &NodeKind) -> Option<(f32, f32)> {
@@ -724,6 +885,37 @@ fn resolve(length: ComputedLength, containing: f32) -> f32 {
         ComputedLength::Percent(value) => containing * value,
     }
     .max(0.0)
+}
+
+fn resolve_offset(length: ComputedLength, containing: f32) -> f32 {
+    match length {
+        ComputedLength::Px(value) => value,
+        ComputedLength::Percent(value) => containing * value,
+    }
+}
+
+fn relative_offset(
+    start: Option<ComputedLength>,
+    end: Option<ComputedLength>,
+    containing: f32,
+) -> f32 {
+    start.map_or_else(
+        || -end.map_or(0.0, |value| resolve_offset(value, containing)),
+        |value| resolve_offset(value, containing),
+    )
+}
+
+fn content_rect(bounds: Rect, style: &arch_style::ComputedStyle) -> Rect {
+    let horizontal = style.border_px + style.padding.left;
+    let vertical = style.border_px + style.padding.top;
+    Rect {
+        x: bounds.x + horizontal,
+        y: bounds.y + vertical,
+        width: (bounds.width - style.border_px * 2.0 - style.padding.left - style.padding.right)
+            .max(0.0),
+        height: (bounds.height - style.border_px * 2.0 - style.padding.top - style.padding.bottom)
+            .max(0.0),
+    }
 }
 
 fn box_dimension(style: &arch_style::ComputedStyle, value: f32) -> f32 {
@@ -1159,5 +1351,87 @@ mod tests {
         assert!(b.bounds.y < a.bounds.y);
         assert!((a.bounds.x - 220.0).abs() < 0.01);
         assert!((a.bounds.y - b.bounds.y - b.bounds.height - 12.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn flex_order_and_basis_control_row_and_column_items() {
+        let document =
+            parse_html("<main><div id='a'>A</div><div id='b'>B</div><div id='c'>C</div></main>");
+        let styled = style_document(
+            &document,
+            &parse_css(
+                "main { display: flex; width: 300px } \
+                 #a { order: 2; flex-basis: 50px; flex-shrink: 0 } \
+                 #b { order: -1; flex-basis: 100px; flex-shrink: 0 } \
+                 #c { order: 0; flex-basis: 25%; flex-shrink: 0 }",
+            ),
+        );
+        let tree = layout(&document, &styled, 400.0, &HashMap::new(), &HashMap::new());
+        let a = element_box(&document, &tree, "a");
+        let b = element_box(&document, &tree, "b");
+        let c = element_box(&document, &tree, "c");
+        assert!(b.bounds.x < c.bounds.x);
+        assert!(c.bounds.x < a.bounds.x);
+        assert!((b.bounds.width - 100.0).abs() < f32::EPSILON);
+        assert!((c.bounds.width - 75.0).abs() < f32::EPSILON);
+
+        let column_styles = style_document(
+            &document,
+            &parse_css(
+                "main { display: flex; flex-direction: column; height: 240px } \
+                 #a { order: 2; flex-basis: 40px } \
+                 #b { order: -1; flex-basis: 80px } \
+                 #c { order: 0; flex-basis: 20px }",
+            ),
+        );
+        let column = layout(
+            &document,
+            &column_styles,
+            400.0,
+            &HashMap::new(),
+            &HashMap::new(),
+        );
+        let a = element_box(&document, &column, "a");
+        let b = element_box(&document, &column, "b");
+        let c = element_box(&document, &column, "c");
+        assert!(b.bounds.y < c.bounds.y);
+        assert!(c.bounds.y < a.bounds.y);
+        assert!((b.bounds.height - 80.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn relative_and_absolute_positioning_preserve_normal_flow() {
+        let document = parse_html(
+            "<main id='main'><div id='before'>before</div><div id='relative'>relative</div><div id='after'>after</div><div id='absolute'>absolute</div></main>",
+        );
+        let styled = style_document(
+            &document,
+            &parse_css(
+                "main { position: relative; width: 400px; height: 200px; padding: 10px } \
+                 div { height: 20px } \
+                 #relative { position: relative; left: 24px; top: 8px } \
+                 #absolute { position: absolute; width: 50px; height: 20px; right: 10%; top: 15px }",
+            ),
+        );
+        let tree = layout_with_viewport(
+            &document,
+            &styled,
+            500.0,
+            300.0,
+            &HashMap::new(),
+            &HashMap::new(),
+        );
+        let main = element_box(&document, &tree, "main");
+        let before = element_box(&document, &tree, "before");
+        let relative = element_box(&document, &tree, "relative");
+        let after = element_box(&document, &tree, "after");
+        let absolute = element_box(&document, &tree, "absolute");
+        assert!((relative.bounds.x - before.bounds.x - 24.0).abs() < f32::EPSILON);
+        assert!((after.bounds.y - before.bounds.y - 40.0).abs() < f32::EPSILON);
+        let content_width = main.bounds.width - 20.0;
+        let expected_x = main.bounds.x + 10.0 + content_width - content_width * 0.1 - 50.0;
+        assert!((absolute.bounds.x - expected_x).abs() < f32::EPSILON);
+        assert!((absolute.bounds.y - (main.bounds.y + 25.0)).abs() < f32::EPSILON);
+        assert!((main.bounds.height - 220.0).abs() < f32::EPSILON);
     }
 }
