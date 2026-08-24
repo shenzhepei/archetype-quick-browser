@@ -15,9 +15,9 @@ English | [简体中文](README-zh-CN.md)
 <!-- repo-badges:end -->
 
 Archetype Quick Browser is a developer-preview desktop browser for static HTML documents. Its
-Rust workspace provides a GPUI/gpui-component shell, title-bar tabs, compact Spaces, per-Space
-bookmarks, navigation history, constrained local and HTTP(S) loading, HTML/CSS processing, basic
-layout, and PNG/JPEG display.
+Rust workspace provides a GPUI/gpui-component shell, a brokered Renderer Runtime, encrypted Cookie
+profiles, basic forms, Flexbox, hibernating tabs, constrained local and HTTP(S) loading, and
+PNG/JPEG display.
 
 > [!NOTE]
 > This project is an engine prototype for development and experimentation, not a production web
@@ -35,6 +35,9 @@ _Deterministic Archetype rendering preview from the checked-in V3 fixture corpus
 - PNG and JPEG decoding, recursive block layout, inline text, borders, and backgrounds.
 - SQLite-backed browser state with corrupt-profile recovery.
 - Cancellable background navigation, independent per-tab rendered pages, and active-tab overflow scrolling.
+- Browser-brokered GET/POST sessions with encrypted persistent Cookies and basic interactive forms.
+- A supervised Renderer Runtime with bounded IPC, crash recovery, macOS sandbox probes, and metadata-only tab hibernation.
+- Flexbox direction, wrapping, alignment, growth, shrinkage, and gaps.
 
 ## Run
 
@@ -56,7 +59,9 @@ cargo run -p arch-browser -- --inspect fixtures/pages/05-image/index.html
 The application writes newline-delimited JSON diagnostics to
 `<application-support>/Archetype/logs/archetype.jsonl`. Logs remain local and the application does
 not collect or upload telemetry. Set `ARCHETYPE_DATA_DIR` to isolate both the profile and logs in a
-custom directory during development or testing.
+custom directory during development or testing. The build messages printed by `cargo run` come
+from Cargo and are absent when launching a packaged binary; the local application diagnostics are
+intentional in both development and release builds.
 
 ## Verify
 
@@ -66,7 +71,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 ```
 
-The workspace test suite compares all 30 fixture renders with the checked-in `1280x800` PNG
+The workspace test suite compares all 50 fixture renders with the checked-in `1280x800` PNG
 references. After an intentional rendering change, regenerate and review them with:
 
 ```bash
@@ -104,6 +109,9 @@ mkdir -p coverage
 cargo llvm-cov --workspace --lcov --output-path coverage/lcov.info
 ```
 
+The `V4 Acceptance` workflow runs the 50-page variant of the one-minute trend probe together with
+the Runtime recovery, sandbox, entitlement, support-matrix, and workspace quality gates.
+
 ## Architecture
 
 The workspace separates browser concerns into focused crates:
@@ -127,6 +135,8 @@ The scoped product requirements and detailed implementation plans are in:
 - [`docs/detailed-design/05-Archetype-V4-安全运行时详设.md`](docs/detailed-design/05-Archetype-V4-安全运行时详设.md)
 - [`docs/v3-acceptance.md`](docs/v3-acceptance.md) and its
   [machine-readable report](docs/v3-acceptance-report.json)
+- [`docs/v4-acceptance.md`](docs/v4-acceptance.md) and the machine-readable
+  [HTML/CSS support matrix](docs/html-css-support.json)
 
 ## V3 Status
 
@@ -147,29 +157,18 @@ The scoped product requirements and detailed implementation plans are in:
   [`docs/v3-acceptance.md`](docs/v3-acceptance.md). JavaScript, forms, media, Flexbox, Grid,
   multi-process rendering, sandboxing, and public signed distribution remain outside V3 scope.
 
-## V4 Development
+## V4 Status
 
-- The stable type, protocol, C1 subprocess, C2 resource-broker, and D1 macOS sandbox slices are complete: UUID V7 page IDs, monotonic
-  navigation IDs, validated URL values, a versioned length-prefixed JSON codec, capability
-  negotiation, bounded in-memory transport, request routing, cancellation, timeout handling,
-  backpressure, protocol fuzzing, a real Renderer Runtime handshake, static document rendering,
-  display-list return, asynchronous Browser supervision, structured disconnects, and a 20-cycle
-  subprocess termination test. The Browser now transfers size-limited same-origin stylesheet and
-  image bytes; Runtime parses and decodes those bytes without receiving paths or using `arch-net`.
-- Local document subresources are restricted to the document directory tree, cross-origin and
-  cross-origin redirect resources are rejected, and the final encoded request is checked against
-  the 16 MiB protocol frame limit before it reaches the child process.
-- Browser authenticates each Runtime over its inherited pipes with a one-time token that is absent
-  from arguments, environment variables, logs, and protocol payloads. The supervisor enforces a
-  five-second request timeout, 512 MiB RSS ceiling, and 64 MiB in-flight request budget.
-- macOS CI proves that the development Runtime profile denies arbitrary file reads, loopback and
-  external connections, listener creation, and subprocess launch. It also ad-hoc signs Browser and
-  Runtime test copies, verifies their embedded entitlement allowlists, and rejects file or network
-  privileges in Runtime.
-- The subprocess path is not yet the desktop application's default navigation path and is not a
-  production signed application bundle. The next slice is E1 session cookies and forms. V4 remains
-  incomplete until desktop integration, distributable signing and notarization, session features,
-  Flexbox, hibernation, and release acceptance all pass the paired specification.
+- V4 complete: stable IDs and versioned bounded IPC; authenticated Renderer Runtime supervision;
+  Browser-owned file, network, Cookie, GET and POST brokers; 100-cycle child termination recovery;
+  macOS development sandbox and signed-entitlement probes; encrypted persistent Cookie profiles;
+  interactive basic forms; Flexbox; metadata-only clean-tab hibernation; and 50 deterministic
+  screenshot fixtures.
+- The Release workflow packages both required binaries, SHA-256 checksums, acceptance evidence,
+  licenses, and the machine-readable support matrix. Its artifacts are unsigned, not notarized,
+  and are developer previews rather than public production distributions.
+- JavaScript, Grid, media, complete forms, public SDK compatibility, production signing,
+  notarization, and automatic updates remain outside V4 scope.
 
 ## License
 

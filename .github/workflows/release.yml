@@ -1,0 +1,31 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  macos-developer-build:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Validate tag and support matrix
+        run: |
+          test "${GITHUB_REF_NAME#v}" = "$(sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml | head -1)"
+          scripts/verify_support_matrix.sh
+      - run: cargo test --workspace
+      - run: cargo build --release --bins
+      - name: Package unsigned developer build
+        run: scripts/package_release.sh "${GITHUB_REF_NAME#v}"
+      - name: Publish GitHub Release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" --verify-tag --generate-notes \
+            --title "Archetype Quick Browser $GITHUB_REF_NAME (unsigned developer preview)" \
+            dist/*.tar.gz dist/*.sha256

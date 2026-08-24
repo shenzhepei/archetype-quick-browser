@@ -26,6 +26,7 @@ struct Options {
     duration: Duration,
     cycle_delay: Duration,
     startup_samples: usize,
+    expected_fixtures: usize,
 }
 
 #[derive(Serialize)]
@@ -123,7 +124,7 @@ struct StabilityMeasurements {
 
 fn main() -> Result<()> {
     let options = parse_options()?;
-    let fixtures = fixture_paths(&options.root)?;
+    let fixtures = fixture_paths(&options.root, options.expected_fixtures)?;
     let startup = measure_startup(&options.root, options.startup_samples)?;
     let measurements = exercise_fixtures(&fixtures, options.duration, options.cycle_delay)?;
     let first_half_cpu_seconds_per_page =
@@ -182,7 +183,7 @@ fn main() -> Result<()> {
         .with_context(|| format!("could not write {}", options.output.display()))?;
     println!("{}", serde_json::to_string_pretty(&report)?);
     if !report.acceptance.passed() {
-        bail!("V3 acceptance thresholds were not met");
+        bail!("acceptance thresholds were not met");
     }
     Ok(())
 }
@@ -193,6 +194,7 @@ fn parse_options() -> Result<Options> {
     let mut duration = Duration::from_secs(60);
     let mut cycle_delay = Duration::from_secs(1);
     let mut startup_samples = 20usize;
+    let mut expected_fixtures = 30usize;
     let mut arguments = env::args().skip(1);
     while let Some(argument) = arguments.next() {
         match argument.as_str() {
@@ -210,11 +212,14 @@ fn parse_options() -> Result<Options> {
             "--startup-samples" => {
                 startup_samples = next_value(&mut arguments, "--startup-samples")?.parse()?;
             }
+            "--expected-fixtures" => {
+                expected_fixtures = next_value(&mut arguments, "--expected-fixtures")?.parse()?;
+            }
             _ => bail!("unknown argument: {argument}"),
         }
     }
-    if startup_samples == 0 {
-        bail!("--startup-samples must be greater than zero");
+    if startup_samples == 0 || expected_fixtures == 0 {
+        bail!("sample and fixture counts must be greater than zero");
     }
     Ok(Options {
         root: root
@@ -224,6 +229,7 @@ fn parse_options() -> Result<Options> {
         duration,
         cycle_delay,
         startup_samples,
+        expected_fixtures,
     })
 }
 
@@ -233,15 +239,18 @@ fn next_value(arguments: &mut impl Iterator<Item = String>, flag: &str) -> Resul
         .with_context(|| format!("missing value for {flag}"))
 }
 
-fn fixture_paths(root: &Path) -> Result<Vec<PathBuf>> {
+fn fixture_paths(root: &Path, expected_fixtures: usize) -> Result<Vec<PathBuf>> {
     let mut fixtures = fs::read_dir(root.join("fixtures/pages"))?
         .filter_map(Result::ok)
         .map(|entry| entry.path().join("index.html"))
         .filter(|path| path.is_file())
         .collect::<Vec<_>>();
     fixtures.sort();
-    if fixtures.len() != 30 {
-        bail!("expected 30 fixture pages, found {}", fixtures.len());
+    if fixtures.len() != expected_fixtures {
+        bail!(
+            "expected {expected_fixtures} fixture pages, found {}",
+            fixtures.len()
+        );
     }
     Ok(fixtures)
 }

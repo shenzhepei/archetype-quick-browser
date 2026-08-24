@@ -1,0 +1,44 @@
+name: V4 Acceptance
+
+on:
+  workflow_dispatch:
+    inputs:
+      duration_seconds:
+        description: Resource-trend duration in seconds
+        required: true
+        default: "60"
+
+jobs:
+  acceptance:
+    runs-on: macos-14
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - run: cargo fmt --all -- --check
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo test --workspace
+      - run: scripts/verify_support_matrix.sh
+      - run: cargo build --release --bins
+      - name: Record one-minute resource trend
+        run: >-
+          ./target/release/arch-v4-acceptance
+          --duration-seconds ${{ inputs.duration_seconds }}
+          --cycle-delay-milliseconds 1000
+          --startup-samples 20
+          --expected-fixtures 50
+          --output artifacts/v4-resource-trend.json
+      - name: Verify Runtime sandbox and entitlements
+        run: |
+          cargo build -p archetype-runtime --bin archetype-sandbox-probe
+          scripts/verify_runtime_sandbox.sh
+          scripts/verify_runtime_entitlements.sh
+      - run: cargo run -p arch-browser --example update_license_inventory
+      - run: git diff --exit-code -- THIRD_PARTY_LICENSES.md
+      - uses: actions/upload-artifact@v4
+        with:
+          name: v4-acceptance-${{ github.sha }}
+          path: artifacts/v4-resource-trend.json
+          if-no-files-found: error

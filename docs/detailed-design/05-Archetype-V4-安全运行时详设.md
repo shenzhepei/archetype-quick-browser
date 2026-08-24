@@ -149,7 +149,7 @@ Ready -> Disconnected -> Backoff -> Starting
 - 监督器按 250 ms 周期采样 RSS，默认上限 512 MiB；请求默认 5 秒超时，在途编码帧默认上限 64 MiB。超时或 RSS 超限会终止并回收 Runtime。
 - `config/macos/runtime.sb` 配合 `scripts/verify_runtime_sandbox.sh` 先证明探针在无沙箱时有效，再证明文件读取、loopback/外网连接、监听和任意子进程启动均以 `EPERM` 失败。
 - `scripts/verify_runtime_entitlements.sh` 对 Browser 和 Runtime Mach-O 测试副本进行临时签名，读取实际嵌入的 entitlement，并对 Browser 三项权限、Runtime 两项继承权限执行精确键白名单检查。
-- 上述证据由 macOS CI 每次执行。它不替代 F 阶段的正式 Developer ID 签名、`.app` helper 嵌入、公证和 Gatekeeper 验收。
+- 上述证据由 macOS CI 每次执行。它不等同 Developer ID 签名、`.app` helper 嵌入、公证和 Gatekeeper 验收；这些生产发行门槛不进入 V4。
 
 ## 8. Cookie、表单与权限
 
@@ -191,10 +191,12 @@ Ready -> Disconnected -> Backoff -> Starting
 | E1 会话 | Cookie、基础表单、迁移 | 本地 HTTP 金样 |
 | E2 布局 | Flex formatting context | 20 金样和截图 |
 | E3 休眠 | 版本化恢复元数据 | 强退、休眠、唤醒测试 |
+| F1 支持矩阵 | `docs/html-css-support.json` 与校验脚本 | 每项支持能力绑定测试证据 |
+| F2 开发者发布 | 双二进制未签名 macOS 包、校验和、验收工作流 | Release 产物可复现且限制明确 |
 
 ## 12. 完成定义
 
-V4 完成必须满足 05 PRD 全部验收项。A1 是本规范批准后的首个实现切片：它只提取现有生产使用的稳定 ID，不创建 Runtime、SDK 或协议空壳。每个后续切片单独提交，并在进入下一阶段前满足对应退出条件。
+V4 已按 A1 至 F2 切片完成 05 PRD 验收范围。桌面 GET/POST 均由 Browser broker 加载并交给 Runtime 渲染；Cookie 值、网络能力和源文件路径不跨入 Runtime。GitHub Release 提供同目录双二进制未签名开发包、SHA-256 校验和、支持矩阵与验收说明。生产签名、公证、自动更新和公开 SDK 稳定承诺继续由后续版本承担。
 
 ## 13. 相关文档
 

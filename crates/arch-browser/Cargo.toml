@@ -54,3 +54,7 @@ path = "src/bin/profile_probe.rs"
 [[bin]]
 name = "arch-v3-acceptance"
 path = "src/bin/v3_acceptance.rs"
+
+[[bin]]
+name = "arch-v4-acceptance"
+path = "src/bin/v4_acceptance.rs"

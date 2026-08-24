@@ -15,8 +15,8 @@
 <!-- repo-badges:end -->
 
 Archetype Quick Browser 是一个面向静态 HTML 文档的开发者预览版桌面浏览器。其 Rust
-工作区提供基于 GPUI/gpui-component 的桌面外壳、标题栏标签页、紧凑型空间、按空间管理的
-书签、导航历史、受限的本地与 HTTP(S) 加载、HTML/CSS 处理、基础布局以及 PNG/JPEG 显示。
+工作区提供基于 GPUI/gpui-component 的桌面外壳、经 broker 管理的 Renderer Runtime、
+加密 Cookie 配置、基础表单、Flexbox、标签休眠、受限的本地与 HTTP(S) 加载以及 PNG/JPEG 显示。
 
 > [!NOTE]
 > 本项目是用于开发和实验的浏览器引擎原型，并非生产级 Web 浏览器。当前桌面应用和 CI
@@ -34,6 +34,9 @@ _来自仓库内 V3 固定测试语料的 Archetype 确定性渲染预览。_
 - PNG 和 JPEG 解码、递归块布局、行内文本、边框与背景。
 - 基于 SQLite 的浏览器状态持久化，并支持损坏配置恢复。
 - 可取消的后台导航、各标签页独立的渲染页面，以及当前标签自动保持可见的溢出滚动。
+- 由 Browser broker 管理的 GET/POST 会话、加密持久 Cookie 和基础交互表单。
+- 带有界 IPC、崩溃恢复、macOS 沙箱探针和纯元数据标签休眠的 Renderer Runtime。
+- Flexbox 方向、换行、对齐、增长、收缩和间距。
 
 ## 运行
 
@@ -54,6 +57,8 @@ cargo run -p arch-browser -- --inspect fixtures/pages/05-image/index.html
 应用会将换行分隔的 JSON 诊断日志写入
 `<应用支持目录>/Archetype/logs/archetype.jsonl`。日志仅保存在本地，应用不会收集或上传遥测。
 开发或测试时可设置 `ARCHETYPE_DATA_DIR`，将配置与日志隔离到指定目录。
+`cargo run` 在终端输出的构建信息来自 Cargo，直接启动打包二进制时不会出现；应用自身的本地
+诊断日志在开发构建和发布构建中都会按设计保留。
 
 ## 验证
 
@@ -63,7 +68,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 ```
 
-工作区测试会将全部 30 个金样渲染结果与仓库内固定的 `1280x800` PNG 参考图比较。
+工作区测试会将全部 50 个金样渲染结果与仓库内固定的 `1280x800` PNG 参考图比较。
 确认渲染变化符合预期后，可使用以下命令重新生成并审查参考图：
 
 ```bash
@@ -99,6 +104,9 @@ mkdir -p coverage
 cargo llvm-cov --workspace --lcov --output-path coverage/lcov.info
 ```
 
+`V4 Acceptance` 工作流会运行 50 页版本的一分钟趋势探针，并同时执行 Runtime 恢复、沙箱、
+entitlement、支持矩阵和工作区质量闸门。
+
 ## 架构
 
 工作区按浏览器职责拆分为多个专用 crate：
@@ -122,6 +130,8 @@ cargo llvm-cov --workspace --lcov --output-path coverage/lcov.info
 - [`docs/detailed-design/05-Archetype-V4-安全运行时详设.md`](docs/detailed-design/05-Archetype-V4-安全运行时详设.md)
 - [`docs/v3-acceptance.md`](docs/v3-acceptance.md) 及其
   [机器可读报告](docs/v3-acceptance-report.json)
+- [`docs/v4-acceptance.md`](docs/v4-acceptance.md) 和机器可读的
+  [HTML/CSS 支持矩阵](docs/html-css-support.json)
 
 ## V3 状态
 
@@ -138,23 +148,15 @@ cargo llvm-cov --workspace --lcov --output-path coverage/lcov.info
 - 每项验收要求的证据和已知限制维护在 [`docs/v3-acceptance.md`](docs/v3-acceptance.md)。
   JavaScript、表单、媒体、Flexbox、Grid、多进程渲染、沙箱和公开签名分发仍不属于 V3 范围。
 
-## V4 开发进度
+## V4 状态
 
-- 稳定类型、协议原型、C1 子进程、C2 资源 broker 与 D1 macOS 沙箱切片已经完成：UUID V7 页面 ID、单调导航 ID、经过验证的 URL
-  值对象、版本化长度前缀 JSON codec、能力协商、有界内存 transport、请求路由、取消、超时、背压、
-  协议模糊测试，以及真实 Renderer Runtime 握手、静态文档渲染、DisplayList 返回、异步 Browser
-  监督、结构化断连和 20 轮子进程终止测试。Browser 现在传递有大小限制的同源样式表和图片字节，
-  Runtime 不接收路径、不使用 `arch-net`，只解析和解码收到的字节。
-- 本地文档子资源被限制在文档目录树内；跨源资源、跨源重定向会被拒绝；完整编码请求进入子进程前会按
-  16 MiB 协议帧上限预检。
-- Browser 使用不进入参数、环境变量、日志或协议负载的一次性令牌，通过继承管道认证每个 Runtime。
-  监督器执行 5 秒请求超时、512 MiB RSS 上限和 64 MiB 在途请求预算。
-- macOS CI 证明开发态 Runtime profile 会拒绝任意文件读取、loopback 与外网连接、监听端口创建和
-  子进程启动；同时对 Browser 与 Runtime 测试副本进行临时签名，核验嵌入 entitlement 白名单，
-  并拒绝 Runtime 获得文件或网络权限。
-- 子进程路径尚未成为桌面应用默认导航路径，也不是可发布的生产签名应用包。下一切片是 E1 会话 Cookie
-  与表单。只有桌面集成、可分发签名与公证、会话能力、Flexbox、休眠和发布验收全部满足配对规范后，
-  V4 才算完成。
+- V4 已完成：稳定 ID 和版本化有界 IPC；带认证的 Renderer Runtime 监督；Browser 所有的文件、
+  网络、Cookie、GET 与 POST broker；100 轮子进程终止恢复；macOS 开发沙箱与签名 entitlement
+  探针；加密持久 Cookie 配置；基础交互表单；Flexbox；只含元数据的干净标签休眠；以及 50 个
+  确定性截图金样。
+- Release 工作流会打包两个必需二进制、SHA-256 校验和、验收证据、许可证和机器可读支持矩阵。
+  其产物未签名、未公证，属于开发者预览而非面向公众的生产发行。
+- JavaScript、Grid、媒体、完整表单、公开 SDK 兼容、生产签名、公证和自动更新仍不属于 V4 范围。
 
 ## 许可证
 
