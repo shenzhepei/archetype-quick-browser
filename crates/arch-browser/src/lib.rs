@@ -103,6 +103,21 @@ impl PendingNavigation {
     pub fn url(&self) -> &Url {
         &self.url
     }
+
+    #[must_use]
+    pub fn page_id(&self) -> &PageId {
+        &self.page_id
+    }
+
+    #[must_use]
+    pub const fn navigation_id(&self) -> NavigationId {
+        self.navigation_id
+    }
+
+    #[must_use]
+    pub fn top_level_url(&self) -> &Url {
+        &self.top_level_url
+    }
 }
 
 impl BrowserCore {
@@ -195,6 +210,20 @@ impl BrowserCore {
         self.store
             .save_cookie_state(&encrypted)
             .context("could not persist profile Cookie state")
+    }
+
+    #[must_use]
+    pub fn cookie_jar_snapshot(&self) -> CookieJar {
+        self.cookie_jar.clone()
+    }
+
+    /// Commits Cookie changes produced by a Browser-side background broker.
+    ///
+    /// # Errors
+    /// Returns an error when encryption or profile persistence fails.
+    pub fn commit_cookie_jar_snapshot(&mut self, cookie_jar: CookieJar) -> Result<()> {
+        self.cookie_jar = cookie_jar;
+        self.persist_cookie_jar()
     }
 
     /// Creates and persists a Space.

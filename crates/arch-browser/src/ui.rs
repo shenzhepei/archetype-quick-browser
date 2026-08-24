@@ -4,14 +4,18 @@ use std::{
     io::Write as _,
     path::PathBuf,
     sync::Arc,
+    time::Duration,
 };
 
 use arch_browser::{
-    BrowserCore, PendingNavigation, RenderError, RenderErrorKind, RenderedPage, render_url,
+    BrowserCore, PendingNavigation, RenderError, RenderErrorKind, RenderedPage,
+    runtime_broker::{BrokerRequest, load_static_document_with_cookies},
+    runtime_supervisor::RuntimeSupervisor,
 };
 use arch_net::{LoadError, LoadErrorKind, Loader};
 use arch_paint::{DisplayCommand, PaintColor};
 use arch_session::Viewport;
+use arch_session::cookies::CookieJar;
 use arch_session::forms::{ControlId, ControlKind};
 use arch_store::{Bookmark, BookmarkKind, Page, Space};
 use arch_style::{FontStyle as PageFontStyle, FontWeight as PageFontWeight, TextAlign};
@@ -226,6 +230,7 @@ pub fn run() {
 struct QuickBrowser {
     language: Language,
     core: BrowserCore,
+    runtime: Option<Arc<RuntimeSupervisor>>,
     spaces: Vec<Space>,
     bookmarks: Vec<Bookmark>,
     pages: Vec<Page>,
@@ -257,6 +262,11 @@ struct FormControlKey {
     control_id: ControlId,
 }
 
+struct CompletedRender {
+    rendered: RenderedPage,
+    cookie_jar: Option<CookieJar>,
+}
+
 impl QuickBrowser {
     fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let language = Language::system();
@@ -266,6 +276,7 @@ impl QuickBrowser {
             eprintln!("profile unavailable at {}: {error}", profile.display());
             BrowserCore::in_memory().expect("in-memory profile must initialize")
         });
+        let runtime = start_runtime();
         let mut spaces = core.spaces().unwrap_or_default();
         if spaces.is_empty() {
             if let Ok(space) = core.create_space(language.default_space_name()) {
@@ -332,6 +343,7 @@ impl QuickBrowser {
         Self {
             language,
             core,
+            runtime,
             spaces,
             bookmarks,
             pages,
@@ -723,11 +735,56 @@ impl QuickBrowser {
         logging::navigation_started(&page_id, url.as_str());
         self.loading_pages.insert(page_id.clone());
         let browser = cx.entity();
+        let runtime = self.runtime.clone();
+        let runtime_page_id = pending.page_id().clone();
+        let navigation_id = pending.navigation_id();
+        let top_level_url = pending.top_level_url().clone();
+        let cookie_jar = self.core.cookie_jar_snapshot();
         let task = window.spawn(cx, async move |cx| {
             let result = cx
                 .background_spawn(async move {
                     let loader = Loader::new()?;
-                    render_url(&loader, &url, 960.0)
+                    if let Some(runtime) = runtime {
+                        let mut cookie_jar = cookie_jar;
+                        let document = load_static_document_with_cookies(
+                            &loader,
+                            &BrokerRequest {
+                                page_id: runtime_page_id,
+                                navigation_id,
+                                url: url.clone(),
+                                viewport_width_px: 960,
+                            },
+                            &mut cookie_jar,
+                            &top_level_url,
+                        )?;
+                        let metadata = arch_browser::render_html(
+                            &Url::parse(document.url.as_str())?,
+                            &document.html,
+                            960.0,
+                        );
+                        let rendered = runtime
+                            .render_document(document)
+                            .recv_timeout(Duration::from_secs(6))??;
+                        Ok(CompletedRender {
+                            rendered: RenderedPage {
+                                final_url: Url::parse(rendered.final_url.as_str())?,
+                                title: rendered.title,
+                                display_list: rendered.display_list,
+                                diagnostics: rendered.diagnostics,
+                                image_resources: rendered.image_resources,
+                                forms: metadata.forms,
+                                form_controls: metadata.form_controls,
+                            },
+                            cookie_jar: Some(cookie_jar),
+                        })
+                    } else {
+                        arch_browser::render_url(&loader, &url, 960.0).map(|rendered| {
+                            CompletedRender {
+                                rendered,
+                                cookie_jar: None,
+                            }
+                        })
+                    }
                 })
                 .await;
             let _ = cx.update(|window, cx| {
@@ -744,7 +801,7 @@ impl QuickBrowser {
         &mut self,
         page: &Page,
         pending: &PendingNavigation,
-        result: anyhow::Result<RenderedPage>,
+        result: anyhow::Result<CompletedRender>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -755,14 +812,24 @@ impl QuickBrowser {
             return;
         }
         match result {
-            Ok(rendered) => match self.core.finish_navigation(page, pending, &rendered) {
-                Ok(true) => self.apply_rendered(page, rendered, window, cx),
-                Ok(false) => cx.notify(),
-                Err(error) => {
+            Ok(completed) => {
+                if let Some(cookie_jar) = completed.cookie_jar
+                    && let Err(error) = self.core.commit_cookie_jar_snapshot(cookie_jar)
+                {
                     self.error = Some(ErrorView::application(self.language, &error));
                     cx.notify();
+                    return;
                 }
-            },
+                let rendered = completed.rendered;
+                match self.core.finish_navigation(page, pending, &rendered) {
+                    Ok(true) => self.apply_rendered(page, rendered, window, cx),
+                    Ok(false) => cx.notify(),
+                    Err(error) => {
+                        self.error = Some(ErrorView::application(self.language, &error));
+                        cx.notify();
+                    }
+                }
+            }
             Err(error) => {
                 logging::navigation_failed(&page.id, pending.url().as_str(), &format!("{error:#}"));
                 if self.selected_page.as_deref() == Some(page.id.as_str()) {
@@ -1966,6 +2033,35 @@ fn profile_path() -> PathBuf {
     let base = logging::data_dir();
     let _ = std::fs::create_dir_all(&base);
     base.join("profile.db")
+}
+
+fn start_runtime() -> Option<Arc<RuntimeSupervisor>> {
+    let executable = std::env::var_os("ARCHETYPE_RUNTIME_PATH")
+        .map(PathBuf::from)
+        .or_else(|| {
+            std::env::current_exe()
+                .ok()
+                .and_then(|path| path.parent().map(|parent| parent.join("archetype-runtime")))
+        })?;
+    if !executable.is_file() {
+        eprintln!(
+            "renderer runtime unavailable at {}; using development in-process fallback",
+            executable.display()
+        );
+        return None;
+    }
+    let (runtime, ready) = RuntimeSupervisor::spawn(&executable).ok()?;
+    match ready.recv_timeout(Duration::from_secs(6)) {
+        Ok(Ok(())) => Some(Arc::new(runtime)),
+        Ok(Err(error)) => {
+            eprintln!("renderer runtime unavailable: {error}");
+            None
+        }
+        Err(error) => {
+            eprintln!("renderer runtime readiness failed: {error}");
+            None
+        }
+    }
 }
 
 fn fixture_url() -> Url {

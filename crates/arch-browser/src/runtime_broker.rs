@@ -2,6 +2,7 @@ use std::{collections::BTreeSet, str};
 
 use arch_dom::NodeKind;
 use arch_net::{LoadError, Loader};
+use arch_session::cookies::CookieJar;
 use archetype_protocol::{BrokeredResource, Codec, ResourceBytes, ResourceKind};
 use archetype_types::{ArchetypeUrl, NavigationId, PageId};
 use thiserror::Error;
@@ -48,15 +49,45 @@ pub fn load_static_document(
     loader: &Loader,
     request: &BrokerRequest,
 ) -> Result<StaticDocument, BrokerError> {
+    let mut load = |url: &Url, limit: usize, _document: bool| loader.load_with_limit(url, limit);
+    load_static_document_with(request, &mut load)
+}
+
+/// Loads a static document through the Browser-owned Cookie policy.
+///
+/// # Errors
+/// Returns a typed broker error under the same limits as [`load_static_document`].
+pub fn load_static_document_with_cookies(
+    loader: &Loader,
+    request: &BrokerRequest,
+    cookie_jar: &mut CookieJar,
+    top_level_url: &Url,
+) -> Result<StaticDocument, BrokerError> {
+    let mut current_top_level = top_level_url.clone();
+    let mut load = |url: &Url, limit: usize, document: bool| {
+        let response =
+            loader.load_with_cookies(url, limit, cookie_jar, &current_top_level, document)?;
+        if document {
+            current_top_level.clone_from(&response.final_url);
+        }
+        Ok(response)
+    };
+    load_static_document_with(request, &mut load)
+}
+
+fn load_static_document_with(
+    request: &BrokerRequest,
+    load: &mut impl FnMut(&Url, usize, bool) -> Result<arch_net::ResponseBytes, LoadError>,
+) -> Result<StaticDocument, BrokerError> {
     if request.viewport_width_px == 0 || request.viewport_width_px > u32::from(u16::MAX) {
         return Err(BrokerError::InvalidViewport);
     }
-    let response = loader
-        .load_with_limit(&request.url, DOCUMENT_BYTE_LIMIT)
-        .map_err(|source| BrokerError::DocumentLoad {
+    let response = load(&request.url, DOCUMENT_BYTE_LIMIT, true).map_err(|source| {
+        BrokerError::DocumentLoad {
             url: request.url.clone(),
             source,
-        })?;
+        }
+    })?;
     let html = str::from_utf8(&response.body)
         .map_err(|_| BrokerError::DocumentEncoding {
             url: response.final_url.clone(),
@@ -89,7 +120,7 @@ pub fn load_static_document(
             continue;
         }
         let limit = remaining.min(RESOURCE_BYTE_LIMIT);
-        match loader.load_with_limit(&resource_url, limit) {
+        match load(&resource_url, limit, false) {
             Ok(resource) if !same_origin(&response.final_url, &resource.final_url) => {
                 diagnostics.push(format!(
                     "ignored {} redirected across origins: {resource_url}",
