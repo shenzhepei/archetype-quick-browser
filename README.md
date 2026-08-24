@@ -61,6 +61,13 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 ```
 
+The workspace test suite compares all 30 fixture renders with the checked-in `1280x800` PNG
+references. After an intentional rendering change, regenerate and review them with:
+
+```bash
+cargo run -p arch-browser --example update_snapshots
+```
+
 To generate the same LCOV report uploaded by CI, install
 [`cargo-llvm-cov`](https://github.com/taiki-e/cargo-llvm-cov) and run:
 
@@ -98,10 +105,10 @@ The scoped product requirements and detailed implementation plans are in:
   local structured JSONL diagnostics without telemetry;
   global tab persistence, hierarchical Space bookmark storage and root bookmark bar, navigation identity,
   redirects, links, and history; all 30 deterministic fixtures with corpus-wide assertions for
-  titles, painted text, resolved links, loaded images, and expected diagnostics.
+  titles, painted text, resolved links, loaded images, expected diagnostics, and fixed PNG
+  screenshot regression at the V3 0.5% pixel-difference threshold.
 - Remaining: complete the CSS/layout support matrix, improve font shaping and link interaction,
-  add screenshot regression and fuzzing, record performance baselines, and gather release
-  acceptance evidence.
+  add fuzzing, record performance baselines, and gather release acceptance evidence.
 
 ## License
 

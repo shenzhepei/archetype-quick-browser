@@ -16,7 +16,9 @@ arch-paint = { path = "../arch-paint" }
 arch-session = { path = "../arch-session" }
 arch-store = { path = "../arch-store" }
 arch-style = { path = "../arch-style" }
+cosmic-text.workspace = true
 directories.workspace = true
+fontdb.workspace = true
 gpui.workspace = true
 gpui-component.workspace = true
 gpui-component-assets.workspace = true

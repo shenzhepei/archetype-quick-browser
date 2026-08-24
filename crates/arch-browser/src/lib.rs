@@ -10,6 +10,8 @@ use thiserror::Error;
 use url::Url;
 use uuid::Uuid;
 
+pub mod snapshot;
+
 const IMAGE_LIMIT: usize = 20 * 1024 * 1024;
 const PAGE_LIMIT: usize = 50 * 1024 * 1024;
 

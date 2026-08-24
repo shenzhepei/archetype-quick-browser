@@ -13,3 +13,12 @@ package declares the ISC license; the copied SVGs retain their original geometry
 and rule parsing. Its source is maintained at <https://github.com/servo/rust-cssparser> and is
 licensed under MPL-2.0. Quick Browser converts its parser output into project-owned value types and
 does not copy Servo engine modules into the product.
+
+`cosmic-text` 0.14.2 is used as an unmodified Cargo dependency for deterministic V3 reference
+snapshot text shaping, system-font fallback, and glyph rasterization. It is maintained at
+<https://github.com/pop-os/cosmic-text> and is dual-licensed under MIT or Apache-2.0.
+
+`NotoSansSC-Regular.otf` is used only by the deterministic snapshot renderer so reference images do
+not vary with the host macOS font version. The font is maintained by the Noto CJK project at
+<https://github.com/notofonts/noto-cjk> and is licensed under the SIL Open Font License 1.1; the
+license text is stored beside the font in `assets/fonts/NotoSansSC/OFL.txt`.

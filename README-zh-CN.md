@@ -58,6 +58,13 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 ```
 
+工作区测试会将全部 30 个金样渲染结果与仓库内固定的 `1280x800` PNG 参考图比较。
+确认渲染变化符合预期后，可使用以下命令重新生成并审查参考图：
+
+```bash
+cargo run -p arch-browser --example update_snapshots
+```
+
 如需生成与 CI 上传内容相同的 LCOV 报告，请安装
 [`cargo-llvm-cov`](https://github.com/taiki-e/cargo-llvm-cov) 并运行：
 
@@ -93,9 +100,9 @@ cargo llvm-cov --workspace --lcov --output-path coverage/lcov.info
   空间与页面持久化；不含遥测的本地结构化 JSONL 诊断日志；
   全局标签页持久化、分层空间书签存储和根书签栏、导航标识、重定向、
   链接与历史；30 个确定性测试页面全部完成，并通过全语料断言验证标题、绘制文本、
-  解析后的链接、已加载图片和预期诊断。
-- 待实现：完善 CSS/布局支持矩阵，改进字体塑形与链接交互，增加截图回归和模糊测试，
-  记录性能基线并收集发布验收证据。
+  解析后的链接、已加载图片和预期诊断；固定 PNG 截图回归达到 V3 的 0.5% 像素差异阈值。
+- 待实现：完善 CSS/布局支持矩阵，改进字体塑形与链接交互，增加模糊测试，记录性能基线
+  并收集发布验收证据。
 
 ## 许可证
 
