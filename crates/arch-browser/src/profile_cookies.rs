@@ -87,7 +87,6 @@ impl CookieCipher {
             .map_err(|_| CookieCipherError::Decrypt)
     }
 
-    #[cfg(test)]
     pub(crate) const fn from_key(key: [u8; COOKIE_KEY_BYTES]) -> Self {
         Self { key }
     }

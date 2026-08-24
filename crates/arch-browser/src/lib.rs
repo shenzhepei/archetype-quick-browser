@@ -133,6 +133,21 @@ impl BrowserCore {
         Self::with_store(store, cookie_cipher)
     }
 
+    /// Opens an encrypted persistent profile with an injected key for process-level probes.
+    ///
+    /// Production callers should use [`Self::open`], which obtains the profile key from Keychain.
+    ///
+    /// # Errors
+    /// Returns an error when the profile database or network client cannot be initialized.
+    #[doc(hidden)]
+    pub fn open_with_cookie_key_for_testing(
+        profile: impl AsRef<Path>,
+        key: [u8; 32],
+    ) -> Result<Self> {
+        let store = Store::open(profile).context("could not open browser profile")?;
+        Self::with_store(store, CookieCipher::from_key(key))
+    }
+
     /// Creates an in-memory browser profile for tests.
     ///
     /// # Errors

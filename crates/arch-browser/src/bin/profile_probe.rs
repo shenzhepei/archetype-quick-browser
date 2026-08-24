@@ -9,7 +9,7 @@ fn main() -> Result<()> {
     let first = fixture_url(env::args().nth(2).context("missing first fixture")?)?;
     let second = fixture_url(env::args().nth(3).context("missing second fixture")?)?;
 
-    let mut core = BrowserCore::open(profile)?;
+    let mut core = BrowserCore::open_with_cookie_key_for_testing(profile, [0x5a; 32])?;
     let work = core.create_space("Work")?;
     let personal = core.create_space("Personal")?;
     let folder = core.create_bookmark_folder(&work.id, None, "References")?;

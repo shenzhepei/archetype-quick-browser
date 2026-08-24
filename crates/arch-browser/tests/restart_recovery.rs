@@ -31,7 +31,7 @@ fn forced_exit_restores_spaces_bookmarks_tabs_and_selection() {
     child.kill().unwrap();
     assert!(!child.wait().unwrap().success());
 
-    let mut restored = BrowserCore::open(&profile).unwrap();
+    let mut restored = BrowserCore::open_with_cookie_key_for_testing(&profile, [0x5a; 32]).unwrap();
     let spaces = restored.spaces().unwrap();
     assert_eq!(
         spaces
