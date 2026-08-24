@@ -16,6 +16,7 @@ arch-style = { path = "../arch-style" }
 thiserror.workspace = true
 
 [dev-dependencies]
+arch-browser = { path = "../arch-browser" }
 archetype-types = { path = "../archetype-types" }
 
 [lints]

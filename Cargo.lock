@@ -113,6 +113,7 @@ dependencies = [
  "arch-session",
  "arch-store",
  "arch-style",
+ "archetype-protocol",
  "archetype-types",
  "cosmic-text",
  "directories",
@@ -226,6 +227,7 @@ dependencies = [
 name = "archetype-runtime"
 version = "0.3.0"
 dependencies = [
+ "arch-browser",
  "arch-css",
  "arch-dom",
  "arch-html",

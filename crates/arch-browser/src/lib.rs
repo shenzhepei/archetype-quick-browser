@@ -10,6 +10,7 @@ use archetype_types::{ArchetypeUrl, LoadStage, NavigationId, PageId};
 use thiserror::Error;
 use url::Url;
 
+pub mod runtime_supervisor;
 pub mod snapshot;
 
 const IMAGE_LIMIT: usize = 20 * 1024 * 1024;
