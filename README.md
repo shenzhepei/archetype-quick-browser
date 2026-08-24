@@ -23,6 +23,10 @@ layout, and PNG/JPEG display.
 > This project is an engine prototype for development and experimentation, not a production web
 > browser. The current desktop application and CI target macOS.
 
+![Deterministic Archetype rendering preview](fixtures/screenshots/07-box-paint.png)
+
+_Deterministic Archetype rendering preview from the checked-in V3 fixture corpus._
+
 ## Features
 
 - Desktop tabs, Spaces, nested bookmarks, and persisted navigation history.
@@ -30,6 +34,7 @@ layout, and PNG/JPEG display.
 - Constrained local and HTTP(S) resource loading with classified TLS, parsing, and rendering error pages.
 - PNG and JPEG decoding, recursive block layout, inline text, borders, and backgrounds.
 - SQLite-backed browser state with corrupt-profile recovery.
+- Cancellable background navigation, independent per-tab rendered pages, and active-tab overflow scrolling.
 
 ## Run
 
@@ -78,6 +83,18 @@ cargo +nightly fuzz run html -- -max_total_time=20 -timeout=5
 cargo +nightly fuzz run css -- -max_total_time=20 -timeout=5
 ```
 
+To reproduce the V3 startup, performance, memory, and one-minute resource-trend evidence, build
+all release binaries and run:
+
+```bash
+cargo build --release --bins
+./target/release/arch-v3-acceptance \
+  --duration-seconds 60 \
+  --cycle-delay-milliseconds 1000 \
+  --startup-samples 20 \
+  --output docs/v3-acceptance-report.json
+```
+
 To generate the same LCOV report uploaded by CI, install
 [`cargo-llvm-cov`](https://github.com/taiki-e/cargo-llvm-cov) and run:
 
@@ -103,10 +120,12 @@ The scoped product requirements and detailed implementation plans are in:
 
 - [`docs/prd/03-Archetype-V3-PRD.md`](docs/prd/03-Archetype-V3-PRD.md)
 - [`docs/detailed-design/03-Archetype-V3-详设.md`](docs/detailed-design/03-Archetype-V3-详设.md)
+- [`docs/v3-acceptance.md`](docs/v3-acceptance.md) and its
+  [machine-readable report](docs/v3-acceptance-report.json)
 
-## Current Coverage
+## V3 Status
 
-- Implemented: workspace and CI; desktop shell with title-bar tabs, compact Space switching, and
+- V3 complete: workspace and CI; desktop shell with title-bar tabs, compact Space switching, and
   per-Space root bookmarks; DOM and HTML parsing; initial CSS parser/cascade;
   recursive block boxes and inline text runs; serializable display lists with positioned text,
   images, backgrounds, and borders; text color, font family, weight, style, alignment, line height,
@@ -117,9 +136,11 @@ The scoped product requirements and detailed implementation plans are in:
   redirects, links, and history; all 30 deterministic fixtures with corpus-wide assertions for
   titles, painted text, resolved links, loaded images, expected diagnostics, and fixed PNG
   screenshot regression at the V3 0.5% pixel-difference threshold; force-exit profile recovery;
-  and CI fuzzing of the HTML and CSS parser entry points.
-- Remaining: complete the CSS/layout support matrix, improve font shaping and link interaction,
-  record performance baselines, and gather release acceptance evidence.
+  CI fuzzing of the HTML and CSS parser entry points; cancellable background navigation; independent
+  per-tab render state; and recorded startup, page-pipeline, frame, CPU, and RSS trend evidence.
+- Known limits and the evidence for every acceptance requirement are maintained in
+  [`docs/v3-acceptance.md`](docs/v3-acceptance.md). JavaScript, forms, media, Flexbox, Grid,
+  multi-process rendering, sandboxing, and public signed distribution remain outside V3 scope.
 
 ## License
 

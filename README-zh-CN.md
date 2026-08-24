@@ -22,6 +22,10 @@ Archetype Quick Browser 是一个面向静态 HTML 文档的开发者预览版�
 > 本项目是用于开发和实验的浏览器引擎原型，并非生产级 Web 浏览器。当前桌面应用和 CI
 > 以 macOS 为目标平台。
 
+![Archetype 确定性渲染预览](fixtures/screenshots/07-box-paint.png)
+
+_来自仓库内 V3 固定测试语料的 Archetype 确定性渲染预览。_
+
 ## 功能
 
 - 桌面标签页、空间、嵌套书签和持久化导航历史。
@@ -29,6 +33,7 @@ Archetype Quick Browser 是一个面向静态 HTML 文档的开发者预览版�
 - 受限的本地与 HTTP(S) 资源加载，并提供 TLS、解析和渲染分类错误页面。
 - PNG 和 JPEG 解码、递归块布局、行内文本、边框与背景。
 - 基于 SQLite 的浏览器状态持久化，并支持损坏配置恢复。
+- 可取消的后台导航、各标签页独立的渲染页面，以及当前标签自动保持可见的溢出滚动。
 
 ## 运行
 
@@ -74,6 +79,17 @@ cargo +nightly fuzz run html -- -max_total_time=20 -timeout=5
 cargo +nightly fuzz run css -- -max_total_time=20 -timeout=5
 ```
 
+如需复现 V3 的启动、性能、内存和一分钟资源趋势证据，请构建全部 release 二进制并运行：
+
+```bash
+cargo build --release --bins
+./target/release/arch-v3-acceptance \
+  --duration-seconds 60 \
+  --cycle-delay-milliseconds 1000 \
+  --startup-samples 20 \
+  --output docs/v3-acceptance-report.json
+```
+
 如需生成与 CI 上传内容相同的 LCOV 报告，请安装
 [`cargo-llvm-cov`](https://github.com/taiki-e/cargo-llvm-cov) 并运行：
 
@@ -99,10 +115,12 @@ cargo llvm-cov --workspace --lcov --output-path coverage/lcov.info
 
 - [`docs/prd/03-Archetype-V3-PRD.md`](docs/prd/03-Archetype-V3-PRD.md)
 - [`docs/detailed-design/03-Archetype-V3-详设.md`](docs/detailed-design/03-Archetype-V3-详设.md)
+- [`docs/v3-acceptance.md`](docs/v3-acceptance.md) 及其
+  [机器可读报告](docs/v3-acceptance-report.json)
 
-## 当前覆盖范围
+## V3 状态
 
-- 已实现：工作区和 CI；带标题栏标签页、紧凑型空间切换和按空间管理根书签的桌面外壳；
+- V3 已完成：工作区和 CI；带标题栏标签页、紧凑型空间切换和按空间管理根书签的桌面外壳；
   DOM 与 HTML 解析；初步的 CSS 解析器和层叠；递归块盒与行内文本；支持定位文本、图片、
   背景和边框的可序列化显示列表；文本颜色、字体族、字重、样式、对齐、行高、空白处理和
   溢出裁剪；受限的文档、样式表、PNG 与 JPEG 加载和图片回退；分类错误页面；支持损坏配置恢复的 SQLite
@@ -110,8 +128,10 @@ cargo llvm-cov --workspace --lcov --output-path coverage/lcov.info
   全局标签页持久化、分层空间书签存储和根书签栏、导航标识、重定向、
   链接与历史；30 个确定性测试页面全部完成，并通过全语料断言验证标题、绘制文本、
   解析后的链接、已加载图片和预期诊断；固定 PNG 截图回归达到 V3 的 0.5% 像素差异阈值。
-  强制退出后的配置恢复，以及 HTML/CSS 解析器入口的 CI 模糊测试也已实现。
-- 待实现：完善 CSS/布局支持矩阵，改进字体塑形与链接交互，记录性能基线并收集发布验收证据。
+  强制退出后的配置恢复、HTML/CSS 解析器入口的 CI 模糊测试、可取消后台导航、标签页独立
+  渲染状态，以及已记录的启动、页面流水线、帧、CPU 和 RSS 趋势证据也已完成。
+- 每项验收要求的证据和已知限制维护在 [`docs/v3-acceptance.md`](docs/v3-acceptance.md)。
+  JavaScript、表单、媒体、Flexbox、Grid、多进程渲染、沙箱和公开签名分发仍不属于 V3 范围。
 
 ## 许可证
 
