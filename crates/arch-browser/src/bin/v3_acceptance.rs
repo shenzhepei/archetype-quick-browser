@@ -15,7 +15,9 @@ use serde::Serialize;
 use url::Url;
 use uuid::Uuid;
 
-const TWO_HOURS_SECONDS: u64 = 7_200;
+const MINIMUM_STABILITY_SECONDS: u64 = 60;
+const MAXIMUM_CPU_COST_GROWTH_RATIO: f64 = 1.5;
+const MAXIMUM_RSS_GROWTH_BYTES: i64 = 16 * 1024 * 1024;
 
 #[derive(Debug)]
 struct Options {
@@ -41,10 +43,52 @@ struct Report {
     startup_to_window_ms: Statistics,
     page_pipeline_ms: Statistics,
     reference_frame_raster_ms: Statistics,
+    process_cpu_seconds: f64,
+    average_cpu_percent: f64,
+    first_half_cpu_seconds_per_page: f64,
+    second_half_cpu_seconds_per_page: f64,
+    cpu_cost_growth_ratio: f64,
+    initial_rss_bytes: u64,
+    final_rss_bytes: u64,
+    rss_growth_bytes: i64,
     peak_rss_bytes: u64,
-    startup_p95_under_two_seconds: bool,
-    all_fixtures_completed: bool,
-    two_hour_stability_completed: bool,
+    acceptance: Acceptance,
+}
+
+#[derive(Clone, Copy, Serialize)]
+struct Acceptance {
+    startup_p95_under_two_seconds: Outcome,
+    all_fixtures_completed: Outcome,
+    one_minute_stability_completed: Outcome,
+    resource_growth_within_limits: Outcome,
+}
+
+impl Acceptance {
+    const fn passed(self) -> bool {
+        self.startup_p95_under_two_seconds.passed()
+            && self.all_fixtures_completed.passed()
+            && self.one_minute_stability_completed.passed()
+            && self.resource_growth_within_limits.passed()
+    }
+}
+
+#[derive(Clone, Copy, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum Outcome {
+    Pass,
+    Fail,
+}
+
+impl Outcome {
+    const fn passed(self) -> bool {
+        matches!(self, Self::Pass)
+    }
+}
+
+impl From<bool> for Outcome {
+    fn from(value: bool) -> Self {
+        if value { Self::Pass } else { Self::Fail }
+    }
 }
 
 #[derive(Serialize)]
@@ -70,6 +114,9 @@ struct StabilityMeasurements {
     pipeline_ms: Vec<f64>,
     frame_ms: Vec<f64>,
     cycles: u64,
+    cycle_cpu_seconds: Vec<f64>,
+    initial_rss_bytes: u64,
+    final_rss_bytes: u64,
     peak_rss_bytes: u64,
     duration: Duration,
 }
@@ -79,8 +126,30 @@ fn main() -> Result<()> {
     let fixtures = fixture_paths(&options.root)?;
     let startup = measure_startup(&options.root, options.startup_samples)?;
     let measurements = exercise_fixtures(&fixtures, options.duration, options.cycle_delay)?;
+    let first_half_cpu_seconds_per_page =
+        half_cpu_seconds_per_page(&measurements.cycle_cpu_seconds, fixtures.len(), false);
+    let second_half_cpu_seconds_per_page =
+        half_cpu_seconds_per_page(&measurements.cycle_cpu_seconds, fixtures.len(), true);
+    let cpu_cost_growth_ratio = if first_half_cpu_seconds_per_page > 0.0 {
+        second_half_cpu_seconds_per_page / first_half_cpu_seconds_per_page
+    } else {
+        0.0
+    };
+    let rss_growth_bytes =
+        signed_difference(measurements.final_rss_bytes, measurements.initial_rss_bytes);
+    let process_cpu_seconds = measurements.cycle_cpu_seconds.iter().sum::<f64>();
+    let one_minute_stability_completed =
+        measurements.duration.as_secs() >= MINIMUM_STABILITY_SECONDS;
+    let resource_growth_within_limits = cpu_cost_growth_ratio <= MAXIMUM_CPU_COST_GROWTH_RATIO
+        && rss_growth_bytes <= MAXIMUM_RSS_GROWTH_BYTES;
+    let acceptance = Acceptance {
+        startup_p95_under_two_seconds: (percentile(&startup, 95, 100) < 2_000.0).into(),
+        all_fixtures_completed: (measurements.cycles > 0).into(),
+        one_minute_stability_completed: one_minute_stability_completed.into(),
+        resource_growth_within_limits: resource_growth_within_limits.into(),
+    };
     let report = Report {
-        schema_version: 1,
+        schema_version: 2,
         generated_at_utc: command_output("date", &["-u", "+%Y-%m-%dT%H:%M:%SZ"]),
         git_commit: command_output("git", &["rev-parse", "HEAD"]),
         machine: machine(),
@@ -94,10 +163,16 @@ fn main() -> Result<()> {
         startup_to_window_ms: statistics(&startup),
         page_pipeline_ms: statistics(&measurements.pipeline_ms),
         reference_frame_raster_ms: statistics(&measurements.frame_ms),
+        process_cpu_seconds,
+        average_cpu_percent: process_cpu_seconds / measurements.duration.as_secs_f64() * 100.0,
+        first_half_cpu_seconds_per_page,
+        second_half_cpu_seconds_per_page,
+        cpu_cost_growth_ratio,
+        initial_rss_bytes: measurements.initial_rss_bytes,
+        final_rss_bytes: measurements.final_rss_bytes,
+        rss_growth_bytes,
         peak_rss_bytes: measurements.peak_rss_bytes,
-        startup_p95_under_two_seconds: percentile(&startup, 95, 100) < 2_000.0,
-        all_fixtures_completed: measurements.cycles > 0,
-        two_hour_stability_completed: measurements.duration.as_secs() >= TWO_HOURS_SECONDS,
+        acceptance,
     };
     if let Some(parent) = options.output.parent() {
         fs::create_dir_all(parent)
@@ -106,6 +181,9 @@ fn main() -> Result<()> {
     fs::write(&options.output, serde_json::to_vec_pretty(&report)?)
         .with_context(|| format!("could not write {}", options.output.display()))?;
     println!("{}", serde_json::to_string_pretty(&report)?);
+    if !report.acceptance.passed() {
+        bail!("V3 acceptance thresholds were not met");
+    }
     Ok(())
 }
 
@@ -231,7 +309,10 @@ fn exercise_fixtures(
     let mut pipeline = Vec::new();
     let mut frame = Vec::new();
     let mut cycles = 0u64;
-    let mut peak_rss = resident_bytes();
+    let mut cycle_cpu_seconds = Vec::new();
+    let mut previous_cpu_seconds = process_cpu_seconds();
+    let mut rss_samples = Vec::new();
+    let mut peak_rss = 0;
     loop {
         for path in fixtures {
             let url = Url::from_file_path(path)
@@ -248,7 +329,12 @@ fn exercise_fixtures(
             }
         }
         cycles = cycles.saturating_add(1);
-        peak_rss = peak_rss.max(resident_bytes());
+        let current_cpu_seconds = process_cpu_seconds();
+        cycle_cpu_seconds.push((current_cpu_seconds - previous_cpu_seconds).max(0.0));
+        previous_cpu_seconds = current_cpu_seconds;
+        let current_rss = resident_bytes();
+        rss_samples.push(current_rss);
+        peak_rss = peak_rss.max(current_rss);
         let elapsed = started.elapsed();
         if elapsed >= requested_duration && cycles > 0 {
             break;
@@ -259,8 +345,69 @@ fn exercise_fixtures(
         pipeline_ms: pipeline,
         frame_ms: frame,
         cycles,
+        cycle_cpu_seconds,
+        initial_rss_bytes: rss_samples.first().copied().unwrap_or_default(),
+        final_rss_bytes: rss_samples.last().copied().unwrap_or_default(),
         peak_rss_bytes: peak_rss,
         duration: started.elapsed(),
+    })
+}
+
+fn process_cpu_seconds() -> f64 {
+    parse_process_time(&command_output(
+        "ps",
+        &["-o", "time=", "-p", &std::process::id().to_string()],
+    ))
+    .unwrap_or_default()
+}
+
+fn parse_process_time(value: &str) -> Option<f64> {
+    let (days, time) = value
+        .trim()
+        .split_once('-')
+        .map_or((0.0, value.trim()), |(days, time)| {
+            (days.parse::<f64>().ok().unwrap_or_default(), time)
+        });
+    let parts = time.split(':').collect::<Vec<_>>();
+    let (hours, minutes, seconds) = match parts.as_slice() {
+        [minutes, seconds] => (
+            0.0,
+            minutes.parse::<f64>().ok()?,
+            seconds.parse::<f64>().ok()?,
+        ),
+        [hours, minutes, seconds] => (
+            hours.parse::<f64>().ok()?,
+            minutes.parse::<f64>().ok()?,
+            seconds.parse::<f64>().ok()?,
+        ),
+        _ => return None,
+    };
+    Some(days * 86_400.0 + hours * 3_600.0 + minutes * 60.0 + seconds)
+}
+
+fn half_cpu_seconds_per_page(values: &[f64], fixture_count: usize, second_half: bool) -> f64 {
+    if values.is_empty() || fixture_count == 0 {
+        return 0.0;
+    }
+    let split = values.len().div_ceil(2);
+    let half = if second_half {
+        &values[split..]
+    } else {
+        &values[..split]
+    };
+    if half.is_empty() {
+        return 0.0;
+    }
+    half.iter().sum::<f64>()
+        / f64::from(u32::try_from(half.len() * fixture_count).unwrap_or(u32::MAX))
+}
+
+fn signed_difference(final_value: u64, initial_value: u64) -> i64 {
+    let difference = i128::from(final_value) - i128::from(initial_value);
+    i64::try_from(difference).unwrap_or(if difference.is_negative() {
+        i64::MIN
+    } else {
+        i64::MAX
     })
 }
 
@@ -332,5 +479,17 @@ mod tests {
         assert!((summary.median - 11.0).abs() < f64::EPSILON);
         assert!((summary.p95 - 20.0).abs() < f64::EPSILON);
         assert!((summary.mean - 10.5).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn parses_process_cpu_time_and_compares_halves() {
+        assert_eq!(parse_process_time("1:02.50"), Some(62.5));
+        assert_eq!(parse_process_time("2:03:04.25"), Some(7_384.25));
+        assert_eq!(parse_process_time("1-02:03:04.25"), Some(93_784.25));
+        assert!(parse_process_time("invalid").is_none());
+
+        let samples = [3.0, 3.0, 4.5, 4.5];
+        assert!((half_cpu_seconds_per_page(&samples, 30, false) - 0.1).abs() < f64::EPSILON);
+        assert!((half_cpu_seconds_per_page(&samples, 30, true) - 0.15).abs() < f64::EPSILON);
     }
 }

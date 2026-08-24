@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       duration_seconds:
-        description: Stability-loop duration in seconds
+        description: Resource-trend loop duration in seconds
         required: true
-        default: "7200"
+        default: "60"
       startup_samples:
         description: Fresh-profile desktop startup samples
         required: true

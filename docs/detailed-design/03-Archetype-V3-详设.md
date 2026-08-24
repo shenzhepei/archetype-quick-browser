@@ -250,6 +250,7 @@ Loading/Parsed/LaidOut --Stop/NewNavigation--> Cancelled
 - 主分支执行截图回归；关键文本和几何区域必须精确，抗锯齿区域允许不超过 0.5% 像素差异。
 - 对 HTML/CSS 入口执行 fuzz；任何 panic、越界或无限循环均阻断发布。
 - 在固定 Apple Silicon 测试机记录冷启动、页面加载、峰值 RSS 和帧时间；V3 建立基线，不与 Chrome 作比例承诺。
+- 资源趋势验收循环全部 30 个金样至少 60 秒；记录每轮进程 CPU 累计时间和 RSS。后半段 CPU 秒/页不得超过前半段 1.5 倍，预热首轮到结束的 RSS 增长不得超过 16 MiB，任一条件失败均阻断发布。
 
 ## 9. 实施顺序
 
