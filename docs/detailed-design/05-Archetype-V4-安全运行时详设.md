@@ -143,6 +143,14 @@ Ready -> Disconnected -> Backoff -> Starting
 
 开发态无法等同签名 App Sandbox。阶段 D 退出必须同时有开发探针和签名测试产物证据，文档不得只凭进程拆分宣称安全。
 
+### 7.1 D1 实施证据
+
+- Browser 通过继承 stdin/stdout 交换一次性 256-bit 启动令牌；令牌不进入命令行、环境变量、日志或协议 payload。
+- 监督器按 250 ms 周期采样 RSS，默认上限 512 MiB；请求默认 5 秒超时，在途编码帧默认上限 64 MiB。超时或 RSS 超限会终止并回收 Runtime。
+- `config/macos/runtime.sb` 配合 `scripts/verify_runtime_sandbox.sh` 先证明探针在无沙箱时有效，再证明文件读取、loopback/外网连接、监听和任意子进程启动均以 `EPERM` 失败。
+- `scripts/verify_runtime_entitlements.sh` 对 Browser 和 Runtime Mach-O 测试副本进行临时签名，读取实际嵌入的 entitlement，并对 Browser 三项权限、Runtime 两项继承权限执行精确键白名单检查。
+- 上述证据由 macOS CI 每次执行。它不替代 F 阶段的正式 Developer ID 签名、`.app` helper 嵌入、公证和 Gatekeeper 验收。
+
 ## 8. Cookie、表单与权限
 
 - Cookie jar 位于 Browser 进程并按 profile 存储；Renderer 只获得经过匹配的请求结果，不获得 HttpOnly Cookie 值。

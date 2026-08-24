@@ -15,5 +15,14 @@ jobs:
       - run: cargo fmt --all -- --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
+      - name: Verify development Runtime sandbox
+        run: |
+          cargo build -p archetype-runtime --bin archetype-sandbox-probe
+          scripts/verify_runtime_sandbox.sh
+      - name: Verify signed Runtime entitlements
+        run: |
+          cargo build --release -p arch-browser --bin arch-browser
+          cargo build --release -p archetype-runtime --bin archetype-runtime
+          scripts/verify_runtime_entitlements.sh
       - run: cargo run -p arch-browser --example update_license_inventory
       - run: git diff --exit-code -- THIRD_PARTY_LICENSES.md

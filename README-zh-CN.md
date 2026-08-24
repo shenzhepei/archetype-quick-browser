@@ -140,15 +140,21 @@ cargo llvm-cov --workspace --lcov --output-path coverage/lcov.info
 
 ## V4 开发进度
 
-- 稳定类型、协议原型、C1 子进程与 C2 资源 broker 切片已经完成：UUID V7 页面 ID、单调导航 ID、经过验证的 URL
+- 稳定类型、协议原型、C1 子进程、C2 资源 broker 与 D1 macOS 沙箱切片已经完成：UUID V7 页面 ID、单调导航 ID、经过验证的 URL
   值对象、版本化长度前缀 JSON codec、能力协商、有界内存 transport、请求路由、取消、超时、背压、
   协议模糊测试，以及真实 Renderer Runtime 握手、静态文档渲染、DisplayList 返回、异步 Browser
   监督、结构化断连和 20 轮子进程终止测试。Browser 现在传递有大小限制的同源样式表和图片字节，
   Runtime 不接收路径、不使用 `arch-net`，只解析和解码收到的字节。
 - 本地文档子资源被限制在文档目录树内；跨源资源、跨源重定向会被拒绝；完整编码请求进入子进程前会按
-  16 MiB 协议帧上限预检。子进程路径尚未成为桌面应用默认导航路径，也不等同于安全沙箱。
-  下一切片是 D1 macOS 沙箱与资源监督。只有桌面集成、签名沙箱证据、会话能力、Flexbox、休眠和
-  发布验收全部满足配对规范后，V4 才算完成。
+  16 MiB 协议帧上限预检。
+- Browser 使用不进入参数、环境变量、日志或协议负载的一次性令牌，通过继承管道认证每个 Runtime。
+  监督器执行 5 秒请求超时、512 MiB RSS 上限和 64 MiB 在途请求预算。
+- macOS CI 证明开发态 Runtime profile 会拒绝任意文件读取、loopback 与外网连接、监听端口创建和
+  子进程启动；同时对 Browser 与 Runtime 测试副本进行临时签名，核验嵌入 entitlement 白名单，
+  并拒绝 Runtime 获得文件或网络权限。
+- 子进程路径尚未成为桌面应用默认导航路径，也不是可发布的生产签名应用包。下一切片是 E1 会话 Cookie
+  与表单。只有桌面集成、可分发签名与公证、会话能力、Flexbox、休眠和发布验收全部满足配对规范后，
+  V4 才算完成。
 
 ## 许可证
 

@@ -149,7 +149,7 @@ The scoped product requirements and detailed implementation plans are in:
 
 ## V4 Development
 
-- The stable type, protocol, C1 subprocess, and C2 resource-broker slices are complete: UUID V7 page IDs, monotonic
+- The stable type, protocol, C1 subprocess, C2 resource-broker, and D1 macOS sandbox slices are complete: UUID V7 page IDs, monotonic
   navigation IDs, validated URL values, a versioned length-prefixed JSON codec, capability
   negotiation, bounded in-memory transport, request routing, cancellation, timeout handling,
   backpressure, protocol fuzzing, a real Renderer Runtime handshake, static document rendering,
@@ -159,10 +159,17 @@ The scoped product requirements and detailed implementation plans are in:
 - Local document subresources are restricted to the document directory tree, cross-origin and
   cross-origin redirect resources are rejected, and the final encoded request is checked against
   the 16 MiB protocol frame limit before it reaches the child process.
+- Browser authenticates each Runtime over its inherited pipes with a one-time token that is absent
+  from arguments, environment variables, logs, and protocol payloads. The supervisor enforces a
+  five-second request timeout, 512 MiB RSS ceiling, and 64 MiB in-flight request budget.
+- macOS CI proves that the development Runtime profile denies arbitrary file reads, loopback and
+  external connections, listener creation, and subprocess launch. It also ad-hoc signs Browser and
+  Runtime test copies, verifies their embedded entitlement allowlists, and rejects file or network
+  privileges in Runtime.
 - The subprocess path is not yet the desktop application's default navigation path and is not a
-  security sandbox. The next slice is D1 macOS sandboxing and resource supervision. V4 remains
-  incomplete until desktop integration, signed sandbox evidence, session features, Flexbox,
-  hibernation, and release acceptance all pass the paired specification.
+  production signed application bundle. The next slice is E1 session cookies and forms. V4 remains
+  incomplete until desktop integration, distributable signing and notarization, session features,
+  Flexbox, hibernation, and release acceptance all pass the paired specification.
 
 ## License
 
