@@ -135,8 +135,8 @@ The scoped product requirements and detailed implementation plans are in:
 - [`docs/detailed-design/05-Archetype-V4-安全运行时详设.md`](docs/detailed-design/05-Archetype-V4-安全运行时详设.md)
 - [`docs/v3-acceptance.md`](docs/v3-acceptance.md) and its
   [machine-readable report](docs/v3-acceptance-report.json)
-- [`docs/v4-acceptance.md`](docs/v4-acceptance.md) and the machine-readable
-  [HTML/CSS support matrix](docs/html-css-support.json)
+- [`docs/v4-acceptance.md`](docs/v4-acceptance.md), its [machine-readable resource report](docs/v4-acceptance-report.json),
+  and the machine-readable [HTML/CSS support matrix](docs/html-css-support.json)
 
 ## V3 Status
 

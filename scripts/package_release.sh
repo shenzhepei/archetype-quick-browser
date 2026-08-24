@@ -25,6 +25,7 @@ for binary in arch-browser archetype-runtime; do
 done
 cp "$repo_root/docs/html-css-support.json" "$stage/docs/"
 cp "$repo_root/docs/v4-acceptance.md" "$stage/docs/"
+cp "$repo_root/docs/v4-acceptance-report.json" "$stage/docs/"
 cp "$repo_root/LICENSE" "$stage/"
 cp "$repo_root/THIRD_PARTY_LICENSES.md" "$stage/"
 printf '%s\n' \

@@ -2,7 +2,9 @@
 
 Archetype V4 is the `0.4.0` unsigned developer preview. This document records the reproducible
 acceptance gates for the paired [V4 PRD](./prd/05-Archetype-V4-安全运行时-PRD.md) and
-[detailed design](./detailed-design/05-Archetype-V4-安全运行时详设.md).
+[detailed design](./detailed-design/05-Archetype-V4-安全运行时详设.md). The checked-in
+[machine-readable report](./v4-acceptance-report.json) records the resource baseline for commit
+`5728271576021492531c5891660fcacb23f54bb5`.
 
 ## Automated gates
 
@@ -23,10 +25,18 @@ and final versus initial RSS; it does not substitute a long-duration crash test.
 timeout (5 seconds), RSS (512 MiB), queued bytes (64 MiB), frame (16 MiB), and pending request (64)
 limits are separately enforced by code and tests.
 
+| Baseline | Result |
+| --- | --- |
+| Fresh-profile startup | P95 232.68 ms across 20 launches |
+| Static page pipeline | P95 0.225 ms across 3,000 loads |
+| Reference raster | P95 0.912 ms across 3,000 frames |
+| CPU trend | 2.40% average; second/first-half cost ratio 1.028x |
+| Memory trend | 30.11 MiB initial; 22.41 MiB final; -7.70 MiB growth |
+
 ## Release artifact
 
 The `Release` workflow packages `arch-browser` and `archetype-runtime` together with binary and
-archive SHA-256 checksums, this report, the support matrix, license, and dependency attribution.
+archive SHA-256 checksums, both acceptance reports, the support matrix, license, and dependency attribution.
 The artifact is intentionally unsigned and not notarized. It is a macOS developer build, not a
 public production distribution; process isolation and the development sandbox probes must not be
 described as equivalent to a notarized production App Sandbox bundle.

@@ -130,8 +130,8 @@ entitlement、支持矩阵和工作区质量闸门。
 - [`docs/detailed-design/05-Archetype-V4-安全运行时详设.md`](docs/detailed-design/05-Archetype-V4-安全运行时详设.md)
 - [`docs/v3-acceptance.md`](docs/v3-acceptance.md) 及其
   [机器可读报告](docs/v3-acceptance-report.json)
-- [`docs/v4-acceptance.md`](docs/v4-acceptance.md) 和机器可读的
-  [HTML/CSS 支持矩阵](docs/html-css-support.json)
+- [`docs/v4-acceptance.md`](docs/v4-acceptance.md)、对应的[机器可读资源报告](docs/v4-acceptance-report.json)
+  和机器可读的 [HTML/CSS 支持矩阵](docs/html-css-support.json)
 
 ## V3 状态
 
