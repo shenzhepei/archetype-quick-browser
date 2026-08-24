@@ -14,6 +14,7 @@ arch-layout = { path = "../arch-layout" }
 arch-paint = { path = "../arch-paint" }
 arch-style = { path = "../arch-style" }
 image.workspace = true
+serde_json.workspace = true
 thiserror.workspace = true
 url.workspace = true
 
@@ -25,3 +26,7 @@ url.workspace = true
 
 [lints]
 workspace = true
+
+[[bin]]
+name = "archetype-sandbox-probe"
+path = "src/bin/sandbox_probe.rs"
