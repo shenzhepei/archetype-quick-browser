@@ -41,3 +41,7 @@ path = "src/main.rs"
 [[bin]]
 name = "arch-profile-probe"
 path = "src/bin/profile_probe.rs"
+
+[[bin]]
+name = "arch-v3-acceptance"
+path = "src/bin/v3_acceptance.rs"

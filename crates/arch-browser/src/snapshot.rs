@@ -319,6 +319,21 @@ mod tests {
         );
     }
 
+    #[test]
+    fn fixed_font_shapes_english_and_chinese_glyphs() {
+        let url = url::Url::parse("file:///font-shaping.html").unwrap();
+        for text in ["English shaping", "中文塑形"] {
+            let page = crate::render_html(&url, &format!("<p>{text}</p>"), VIEWPORT_WIDTH);
+            let snapshot = SnapshotRenderer::default().render(&page);
+            assert!(
+                snapshot
+                    .pixels()
+                    .any(|pixel| pixel.0 != [255, 255, 255, 255]),
+                "fixed snapshot font did not rasterize {text}"
+            );
+        }
+    }
+
     #[cfg(target_os = "macos")]
     #[test]
     fn fixture_snapshots_match_references() {
