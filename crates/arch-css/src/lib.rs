@@ -441,6 +441,7 @@ fn supported_property(name: &str) -> bool {
             "display"
                 | "color"
                 | "background-color"
+                | "background"
                 | "font-size"
                 | "font-family"
                 | "line-height"
@@ -461,6 +462,10 @@ fn supported_property(name: &str) -> bool {
                 | "border"
                 | "border-width"
                 | "border-color"
+                | "border-radius"
+                | "box-shadow"
+                | "opacity"
+                | "text-decoration"
                 | "width"
                 | "height"
                 | "min-width"
@@ -474,6 +479,7 @@ fn supported_property(name: &str) -> bool {
                 | "gap"
                 | "row-gap"
                 | "column-gap"
+                | "grid-template-columns"
                 | "flex-grow"
                 | "flex-shrink"
                 | "flex-basis"
@@ -614,6 +620,18 @@ mod tests {
                 "ignored unsupported CSS property: unknown"
             ]
         );
+    }
+
+    #[test]
+    fn accepts_v7_grid_and_visual_properties() {
+        let sheet = parse(
+            "main { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; \
+             border-radius: 8px; opacity: .8; box-shadow: 0 2px 8px #000; \
+             text-decoration: underline; background: #fff }",
+        );
+
+        assert!(sheet.diagnostics.is_empty());
+        assert_eq!(sheet.rules[0].declarations.len(), 8);
     }
 
     #[test]

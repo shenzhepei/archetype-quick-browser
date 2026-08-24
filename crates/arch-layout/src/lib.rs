@@ -6,7 +6,7 @@ use std::{
 use arch_dom::{Document, NodeId, NodeKind};
 use arch_style::{
     BoxSizing, ComputedLength, Display, FlexAlign, FlexDirection, FlexJustify, FlexWrap, FontStyle,
-    FontWeight, Overflow, Position, StyledNode, TextAlign, WhiteSpace,
+    FontWeight, GridTrack, Overflow, Position, StyledNode, TextAlign, TextDecoration, WhiteSpace,
 };
 use serde::{Deserialize, Serialize};
 
@@ -36,7 +36,11 @@ pub struct LayoutBox {
     pub background_color: Option<String>,
     pub border_color: Option<String>,
     pub border_width_px: f32,
+    pub border_radius_px: f32,
+    pub opacity: f32,
+    pub box_shadow: Option<arch_style::BoxShadow>,
     pub text_align: TextAlign,
+    pub text_decoration: TextDecoration,
     pub z_index: i32,
     pub paint_order: usize,
 }
@@ -188,6 +192,38 @@ fn flex_main_sizes(items: &[FlexSeed], available: f32, gap: f32) -> Vec<f32> {
     sizes
 }
 
+fn grid_track_widths(tracks: &[GridTrack], available: f32, gap: f32) -> Vec<f32> {
+    if tracks.is_empty() {
+        return vec![available.max(0.0)];
+    }
+    let content_width = (available - gap * gap_count(tracks.len())).max(0.0);
+    let fixed = tracks
+        .iter()
+        .map(|track| match track {
+            GridTrack::Length(length) => resolve(*length, content_width),
+            GridTrack::Fraction(_) => 0.0,
+        })
+        .sum::<f32>();
+    let fraction_total = tracks
+        .iter()
+        .map(|track| match track {
+            GridTrack::Fraction(value) => *value,
+            GridTrack::Length(_) => 0.0,
+        })
+        .sum::<f32>();
+    let remaining = (content_width - fixed).max(0.0);
+    tracks
+        .iter()
+        .map(|track| match track {
+            GridTrack::Length(length) => resolve(*length, content_width),
+            GridTrack::Fraction(value) if fraction_total > 0.0 => {
+                remaining * value / fraction_total
+            }
+            GridTrack::Fraction(_) => 0.0,
+        })
+        .collect()
+}
+
 fn justify_offsets(justify: FlexJustify, free: f32, item_count: usize, gap: f32) -> (f32, f32) {
     let count = f32::from(u16::try_from(item_count).unwrap_or(u16::MAX));
     match justify {
@@ -243,8 +279,10 @@ impl<S: BuildHasher> LayoutContext<'_, S> {
         let text = normalized_text(&node.kind, style.white_space);
         let image = self.images.get(&node.id).cloned();
         let form_dimensions = form_control_dimensions(&node.kind);
-        let creates_box = matches!(style.display, Display::Block | Display::Flex)
-            || text.is_some()
+        let creates_box = matches!(
+            style.display,
+            Display::Block | Display::Flex | Display::Grid
+        ) || text.is_some()
             || image.is_some()
             || form_dimensions.is_some();
         if creates_box {
@@ -336,7 +374,11 @@ impl<S: BuildHasher> LayoutContext<'_, S> {
             background_color: style.background_color.clone(),
             border_color: style.border_color.clone(),
             border_width_px: style.border_px,
+            border_radius_px: style.border_radius_px,
+            opacity: style.opacity,
+            box_shadow: style.box_shadow.clone(),
             text_align: style.text_align,
+            text_decoration: style.text_decoration,
             z_index: style.z_index,
             paint_order: box_index,
         });
@@ -352,6 +394,8 @@ impl<S: BuildHasher> LayoutContext<'_, S> {
     ) {
         if style.display == Display::Flex {
             self.layout_flex_children(children, containing, style, cursor_y);
+        } else if style.display == Display::Grid {
+            self.layout_grid_children(children, containing, style, cursor_y);
         } else {
             self.layout_children(children, containing, cursor_y);
         }
@@ -390,7 +434,10 @@ impl<S: BuildHasher> LayoutContext<'_, S> {
                 self.hidden.insert(*child_id);
                 continue;
             }
-            if matches!(style.display, Display::Block | Display::Flex) {
+            if matches!(
+                style.display,
+                Display::Block | Display::Flex | Display::Grid
+            ) {
                 if flow.line_height > 0.0 {
                     *flow.cursor_y += flow.line_height;
                     flow.x = 0.0;
@@ -474,6 +521,69 @@ impl<S: BuildHasher> LayoutContext<'_, S> {
         if has_lines {
             *cursor_y -= container_style.row_gap;
         }
+    }
+
+    fn layout_grid_children(
+        &mut self,
+        children: &[NodeId],
+        containing: ContainingBlock,
+        container_style: &arch_style::ComputedStyle,
+        cursor_y: &mut f32,
+    ) {
+        let tracks = grid_track_widths(
+            &container_style.grid_template_columns,
+            containing.width,
+            container_style.column_gap,
+        );
+        let mut column = 0_usize;
+        let mut row_y = *cursor_y;
+        let mut row_height = 0.0_f32;
+        for node_id in children {
+            let Some(style) = self.style_by_node.get(node_id).copied() else {
+                continue;
+            };
+            if style.display == Display::None {
+                self.hidden.insert(*node_id);
+                continue;
+            }
+            if style.position == Position::Absolute {
+                self.pending_absolute
+                    .push((*node_id, containing.positioned_ancestor));
+                continue;
+            }
+            if column == tracks.len() {
+                row_y += row_height + container_style.row_gap;
+                row_height = 0.0;
+                column = 0;
+            }
+            let x = containing.x
+                + tracks[..column].iter().sum::<f32>()
+                + container_style.column_gap * gap_count(column + 1);
+            let start = self.tree.boxes.len();
+            let mut temporary_y = 0.0;
+            self.layout_node(
+                *node_id,
+                ContainingBlock {
+                    x: 0.0,
+                    width: tracks[column],
+                    ..containing
+                },
+                false,
+                &mut temporary_y,
+            );
+            let end = self.tree.boxes.len();
+            if start < end {
+                self.tree.boxes[start].bounds.width = tracks[column];
+                row_height = row_height.max(self.tree.boxes[start].bounds.height);
+                self.move_boxes(start, end, x, row_y);
+            }
+            column += 1;
+        }
+        *cursor_y = if column == 0 && row_height == 0.0 {
+            row_y
+        } else {
+            row_y + row_height
+        };
     }
 
     fn layout_flex_row_line(
@@ -1295,6 +1405,31 @@ mod tests {
         assert!((a.bounds.width - 186.666_67).abs() < 0.01);
         assert!((b.bounds.x - a.bounds.x - a.bounds.width - 20.0).abs() < 0.01);
         assert!((c.bounds.x - b.bounds.x - b.bounds.width - 20.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn grid_distributes_mixed_tracks_and_places_multiple_rows() {
+        let document = parse_html(
+            "<main><div id='a'>A</div><div id='b'>B</div><div id='c'>C</div><div id='d'>D</div></main>",
+        );
+        let styled = style_document(
+            &document,
+            &parse_css(
+                "main { display: grid; width: 400px; grid-template-columns: 100px 1fr 2fr; \
+                 column-gap: 10px; row-gap: 12px } div { height: 30px }",
+            ),
+        );
+        let tree = layout(&document, &styled, 500.0, &HashMap::new(), &HashMap::new());
+        let a = element_box(&document, &tree, "a");
+        let b = element_box(&document, &tree, "b");
+        let c = element_box(&document, &tree, "c");
+        let d = element_box(&document, &tree, "d");
+
+        assert!((a.bounds.width - 100.0).abs() < 0.01);
+        assert!((b.bounds.width - 93.333_33).abs() < 0.01);
+        assert!((c.bounds.width - 186.666_67).abs() < 0.01);
+        assert!((b.bounds.x - a.bounds.x - 110.0).abs() < 0.01);
+        assert!((d.bounds.y - a.bounds.y - 42.0).abs() < 0.01);
     }
 
     #[test]

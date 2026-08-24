@@ -13,6 +13,7 @@ pub enum Display {
     Inline,
     Block,
     Flex,
+    Grid,
     None,
 }
 
@@ -111,6 +112,28 @@ pub enum Position {
     Absolute,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub enum GridTrack {
+    Length(ComputedLength),
+    Fraction(f32),
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct BoxShadow {
+    pub offset_x_px: f32,
+    pub offset_y_px: f32,
+    pub blur_px: f32,
+    pub color: String,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub enum TextDecoration {
+    #[default]
+    None,
+    Underline,
+    LineThrough,
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct EdgeSizes {
     pub top: f32,
@@ -124,6 +147,9 @@ pub struct ComputedStyle {
     pub display: Display,
     pub color: Option<String>,
     pub background_color: Option<String>,
+    pub border_radius_px: f32,
+    pub opacity: f32,
+    pub box_shadow: Option<BoxShadow>,
     pub border_color: Option<String>,
     pub font_size_px: f32,
     pub font_family: Option<String>,
@@ -132,6 +158,7 @@ pub struct ComputedStyle {
     pub font_weight: FontWeight,
     pub font_style: FontStyle,
     pub text_align: TextAlign,
+    pub text_decoration: TextDecoration,
     pub margin: EdgeSizes,
     pub padding: EdgeSizes,
     pub border_px: f32,
@@ -147,6 +174,7 @@ pub struct ComputedStyle {
     pub align_items: FlexAlign,
     pub row_gap: f32,
     pub column_gap: f32,
+    pub grid_template_columns: Vec<GridTrack>,
     pub flex_grow: f32,
     pub flex_shrink: f32,
     pub flex_basis: Option<ComputedLength>,
@@ -301,6 +329,7 @@ fn ua_style(kind: &NodeKind, inherited: Option<&ComputedStyle>) -> ComputedStyle
         font_style,
         white_space,
         flex_shrink: 1.0,
+        opacity: 1.0,
         ..ComputedStyle::default()
     };
     if let Some(parent) = inherited {
@@ -466,16 +495,19 @@ fn apply(style: &mut ComputedStyle, declarations: &BTreeMap<String, CascadeWinne
         if apply_typography_property(style, name, value) {
             continue;
         }
+        if apply_visual_property(style, name, value) {
+            continue;
+        }
         match name.as_str() {
             "display" => {
                 style.display = match value.as_str() {
                     "block" => Display::Block,
                     "flex" => Display::Flex,
+                    "grid" => Display::Grid,
                     "none" => Display::None,
                     _ => Display::Inline,
                 };
             }
-            "background-color" => style.background_color = Some(value.clone()),
             "font-family" => {
                 if let Some(family) = arch_css::first_font_family(value) {
                     style.font_family = Some(family);
@@ -536,6 +568,40 @@ fn apply(style: &mut ComputedStyle, declarations: &BTreeMap<String, CascadeWinne
             _ => {}
         }
     }
+}
+
+fn apply_visual_property(style: &mut ComputedStyle, name: &str, value: &str) -> bool {
+    match name {
+        "background-color" => style.background_color = Some(value.to_owned()),
+        "background" => {
+            if is_simple_color(value) {
+                style.background_color = Some(value.to_owned());
+            }
+        }
+        "border-radius" => {
+            set_nonnegative(&mut style.border_radius_px, value, style.font_size_px);
+        }
+        "opacity" => {
+            if let Some(value) = unit_interval(value) {
+                style.opacity = value;
+            }
+        }
+        "box-shadow" => style.box_shadow = parse_box_shadow(value, style.font_size_px),
+        "text-decoration" => {
+            style.text_decoration = match value {
+                "underline" => TextDecoration::Underline,
+                "line-through" => TextDecoration::LineThrough,
+                _ => TextDecoration::None,
+            };
+        }
+        "grid-template-columns" => {
+            if let Some(tracks) = parse_grid_tracks(value, style.font_size_px) {
+                style.grid_template_columns = tracks;
+            }
+        }
+        _ => return false,
+    }
+    true
 }
 
 fn apply_typography_property(style: &mut ComputedStyle, name: &str, value: &str) -> bool {
@@ -674,6 +740,103 @@ fn nonnegative_number(value: &str) -> Option<f32> {
         .parse::<f32>()
         .ok()
         .filter(|value| value.is_finite() && *value >= 0.0)
+}
+
+fn unit_interval(value: &str) -> Option<f32> {
+    value
+        .parse::<f32>()
+        .ok()
+        .filter(|value| value.is_finite() && (0.0..=1.0).contains(value))
+}
+
+fn is_simple_color(value: &str) -> bool {
+    let value = value.trim().to_ascii_lowercase();
+    matches!(
+        value.as_str(),
+        "black" | "white" | "red" | "green" | "blue" | "transparent"
+    ) || matches!(value.len(), 4 | 5 | 7 | 9) && value.starts_with('#')
+}
+
+fn parse_box_shadow(value: &str, em_px: f32) -> Option<BoxShadow> {
+    if value == "none" {
+        return None;
+    }
+    let parts = value.split_whitespace().collect::<Vec<_>>();
+    if parts.len() != 4 || parts.contains(&"inset") {
+        return None;
+    }
+    let blur_px = absolute_length(parts[2], em_px)?;
+    if !(0.0..=64.0).contains(&blur_px) || !is_simple_color(parts[3]) {
+        return None;
+    }
+    Some(BoxShadow {
+        offset_x_px: signed_absolute_length(parts[0], em_px)?,
+        offset_y_px: signed_absolute_length(parts[1], em_px)?,
+        blur_px,
+        color: parts[3].to_owned(),
+    })
+}
+
+fn signed_absolute_length(value: &str, em_px: f32) -> Option<f32> {
+    let (number, unit_scale) = if let Some(value) = value.strip_suffix("px") {
+        (value, 1.0)
+    } else if let Some(value) = value.strip_suffix("rem") {
+        (value, 16.0)
+    } else if let Some(value) = value.strip_suffix("em") {
+        (value, em_px)
+    } else if value == "0" {
+        return Some(0.0);
+    } else {
+        return None;
+    };
+    number
+        .parse::<f32>()
+        .ok()
+        .filter(|value| value.is_finite())
+        .map(|value| value * unit_scale)
+}
+
+fn parse_grid_tracks(value: &str, em_px: f32) -> Option<Vec<GridTrack>> {
+    let normalized = value.replace(", ", ",");
+    let mut tracks = Vec::new();
+    for part in normalized.split_whitespace() {
+        if let Some(arguments) = part
+            .strip_prefix("repeat(")
+            .and_then(|part| part.strip_suffix(')'))
+        {
+            let (count, track) = arguments.split_once(',')?;
+            let count = count
+                .parse::<usize>()
+                .ok()
+                .filter(|count| (1..=64).contains(count))?;
+            let track = parse_grid_track(track, em_px)?;
+            if tracks.len() + count > 64 {
+                return None;
+            }
+            tracks.extend(std::iter::repeat_n(track, count));
+        } else {
+            if tracks.len() == 64 {
+                return None;
+            }
+            tracks.push(parse_grid_track(part, em_px)?);
+        }
+    }
+    (!tracks.is_empty()).then_some(tracks)
+}
+
+fn parse_grid_track(value: &str, em_px: f32) -> Option<GridTrack> {
+    if let Some(value) = value.strip_suffix("fr") {
+        return value
+            .parse::<f32>()
+            .ok()
+            .filter(|value| value.is_finite() && *value > 0.0)
+            .map(GridTrack::Fraction);
+    }
+    length(value, em_px)
+        .filter(|length| match length {
+            ComputedLength::Px(value) | ComputedLength::Percent(value) => *value >= 0.0,
+        })
+        .map(GridTrack::Length)
 }
 
 fn set_nonnegative(target: &mut f32, value: &str, em_px: f32) {
@@ -881,6 +1044,32 @@ mod tests {
                 .iter()
                 .any(|node| node.style.color.as_deref() == Some("red"))
         );
+    }
+
+    #[test]
+    fn computes_v7_grid_tracks_and_visual_properties() {
+        let document = parse_html("<main>grid</main>");
+        let styled = style_document(
+            &document,
+            &parse(
+                "main { display: grid; grid-template-columns: 120px 25% repeat(2, 1fr); \
+                 gap: 8px 12px; border-radius: 10px; opacity: .75; \
+                 box-shadow: 0 4px 12px #0008; text-decoration: line-through; \
+                 background: #fff }",
+            ),
+        );
+        let style = styled
+            .iter()
+            .find(|node| node.style.display == Display::Grid)
+            .unwrap();
+
+        assert_eq!(style.style.grid_template_columns.len(), 4);
+        assert_eq!((style.style.row_gap, style.style.column_gap), (8.0, 12.0));
+        assert!((style.style.border_radius_px - 10.0).abs() < f32::EPSILON);
+        assert!((style.style.opacity - 0.75).abs() < f32::EPSILON);
+        assert_eq!(style.style.text_decoration, TextDecoration::LineThrough);
+        assert_eq!(style.style.background_color.as_deref(), Some("#fff"));
+        assert!(style.style.box_shadow.is_some());
     }
 
     #[test]
