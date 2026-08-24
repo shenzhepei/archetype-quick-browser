@@ -5,6 +5,58 @@ updates:
     directory: /
     schedule:
       interval: weekly
+  - package-ecosystem: cargo
+    directory: /crates/arch-browser
+    schedule:
+      interval: weekly
+  - package-ecosystem: cargo
+    directory: /crates/arch-css
+    schedule:
+      interval: weekly
+  - package-ecosystem: cargo
+    directory: /crates/arch-dom
+    schedule:
+      interval: weekly
+  - package-ecosystem: cargo
+    directory: /crates/arch-html
+    schedule:
+      interval: weekly
+  - package-ecosystem: cargo
+    directory: /crates/arch-layout
+    schedule:
+      interval: weekly
+  - package-ecosystem: cargo
+    directory: /crates/arch-net
+    schedule:
+      interval: weekly
+  - package-ecosystem: cargo
+    directory: /crates/arch-paint
+    schedule:
+      interval: weekly
+  - package-ecosystem: cargo
+    directory: /crates/arch-session
+    schedule:
+      interval: weekly
+  - package-ecosystem: cargo
+    directory: /crates/arch-store
+    schedule:
+      interval: weekly
+  - package-ecosystem: cargo
+    directory: /crates/arch-style
+    schedule:
+      interval: weekly
+  - package-ecosystem: cargo
+    directory: /crates/archetype-protocol
+    schedule:
+      interval: weekly
+  - package-ecosystem: cargo
+    directory: /crates/archetype-runtime
+    schedule:
+      interval: weekly
+  - package-ecosystem: cargo
+    directory: /crates/archetype-types
+    schedule:
+      interval: weekly
   # cargo-fuzz requires an independent manifest outside the workspace.
   - package-ecosystem: cargo
     directory: /fuzz
