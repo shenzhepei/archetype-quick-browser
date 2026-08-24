@@ -770,6 +770,46 @@ mod tests {
     }
 
     #[test]
+    fn upgrades_schema_v2_to_v3_without_losing_profile_data() {
+        let directory = std::env::temp_dir().join(format!("archetype-store-{}", Uuid::now_v7()));
+        fs::create_dir(&directory).unwrap();
+        let path = directory.join("profile.db");
+        let connection = Connection::open(&path).unwrap();
+        connection
+            .execute_batch(
+                "CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at INTEGER NOT NULL);
+                 CREATE TABLE spaces (id TEXT PRIMARY KEY, name TEXT NOT NULL, position INTEGER NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
+                 CREATE TABLE pages (id TEXT PRIMARY KEY, url TEXT NOT NULL, title TEXT NOT NULL DEFAULT '', position INTEGER NOT NULL, last_visited_at INTEGER NOT NULL);
+                 CREATE TABLE bookmarks (id TEXT PRIMARY KEY, space_id TEXT NOT NULL REFERENCES spaces(id) ON DELETE CASCADE, parent_id TEXT REFERENCES bookmarks(id) ON DELETE CASCADE, kind TEXT NOT NULL, title TEXT NOT NULL, url TEXT, position INTEGER NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
+                 CREATE TABLE app_state (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+                 INSERT INTO schema_migrations VALUES (1, 0), (2, 0);
+                 INSERT INTO spaces VALUES ('space', 'Research', 0, 0, 0);
+                 INSERT INTO pages VALUES ('page', 'https://example.com', 'Example', 0, 0);
+                 INSERT INTO app_state VALUES ('selected_page_id', 'page');",
+            )
+            .unwrap();
+        drop(connection);
+
+        let store = Store::open(&path).unwrap();
+        assert_eq!(store.spaces().unwrap()[0].name, "Research");
+        assert_eq!(store.pages().unwrap()[0].title, "Example");
+        assert_eq!(
+            store.state("selected_page_id").unwrap().as_deref(),
+            Some("page")
+        );
+        assert!(store.cookie_state().unwrap().is_none());
+        let version: i64 = store
+            .connection
+            .query_row("SELECT MAX(version) FROM schema_migrations", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(version, 3);
+        drop(store);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
     fn stores_bookmark_folders_and_compacts_deleted_siblings() {
         let mut store = Store::in_memory().unwrap();
         let space = store.create_space("Work").unwrap();

@@ -1582,6 +1582,38 @@ mod tests {
     }
 
     #[test]
+    fn cookie_profiles_are_isolated_by_store_and_key() {
+        let origin = Url::parse("https://example.com/").unwrap();
+        let mut first = BrowserCore::with_store(
+            Store::in_memory().unwrap(),
+            profile_cookies::CookieCipher::from_key([1; 32]),
+        )
+        .unwrap();
+        let second = BrowserCore::with_store(
+            Store::in_memory().unwrap(),
+            profile_cookies::CookieCipher::from_key([2; 32]),
+        )
+        .unwrap();
+        first
+            .store_response_cookie(
+                &origin,
+                "profile=first; Secure; Expires=Tue, 03 Aug 2100 00:38:37 GMT",
+            )
+            .unwrap();
+        let request = CookieRequest {
+            url: &origin,
+            top_level_url: &origin,
+            method: RequestMethod::Get,
+            is_top_level_navigation: true,
+        };
+        assert_eq!(
+            first.cookie_header(request),
+            Some("profile=first".to_owned())
+        );
+        assert_eq!(second.cookie_header(request), None);
+    }
+
+    #[test]
     fn application_core_navigates_back_and_forward() {
         let first_path = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../fixtures/pages/01-document/index.html")
@@ -1783,6 +1815,50 @@ mod tests {
         let rendered = core.submit_form(&page, &submission, 1280.0).unwrap();
         server.join().unwrap();
         assert_eq!(rendered.title, "Posted");
+    }
+
+    #[test]
+    fn form_post_sends_same_site_cookie_and_suppresses_it_cross_site() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = thread::spawn(move || {
+            for (method, expect_cookie) in
+                [("POST", Some(true)), ("GET", None), ("POST", Some(false))]
+            {
+                let (mut stream, _) = listener.accept().unwrap();
+                let mut request = [0_u8; 4096];
+                let length = stream.read(&mut request).unwrap();
+                let request = String::from_utf8_lossy(&request[..length]).to_ascii_lowercase();
+                assert!(request.starts_with(&method.to_ascii_lowercase()));
+                if let Some(expect_cookie) = expect_cookie {
+                    assert_eq!(request.contains("cookie: form=allowed"), expect_cookie);
+                }
+                write!(
+                    stream,
+                    "HTTP/1.1 200 OK\r\nContent-Length: 21\r\nConnection: close\r\n\r\n<title>Posted</title>"
+                )
+                .unwrap();
+            }
+        });
+        let target = Url::parse(&format!("http://{address}/submit")).unwrap();
+        let cross_site = Url::parse(&format!("http://localhost:{}/", address.port())).unwrap();
+        let mut core = BrowserCore::in_memory().unwrap();
+        core.store_response_cookie(&target, "form=allowed; Path=/; SameSite=Lax")
+            .unwrap();
+        let same_site_page = core.create_page(&target).unwrap();
+        let cross_site_page = core.create_page(&cross_site).unwrap();
+        let submission = FormSubmission {
+            method: FormMethod::Post,
+            target,
+            encoded: "field=value".to_owned(),
+        };
+        core.submit_form(&same_site_page, &submission, 1280.0)
+            .unwrap();
+        core.navigate(&cross_site_page, &cross_site, 1280.0)
+            .unwrap();
+        core.submit_form(&cross_site_page, &submission, 1280.0)
+            .unwrap();
+        server.join().unwrap();
     }
 
     #[test]
