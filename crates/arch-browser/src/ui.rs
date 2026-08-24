@@ -16,7 +16,7 @@ use arch_browser::{
     },
 };
 use arch_net::{LoadError, LoadErrorKind, Loader};
-use arch_paint::{DisplayCommand, PaintColor};
+use arch_paint::{DisplayCommand, PaintColor, TextDecoration};
 use arch_session::Viewport;
 use arch_session::cookies::CookieJar;
 use arch_session::forms::{ControlId, ControlKind, FormMethod, FormSubmission};
@@ -24,7 +24,7 @@ use arch_store::{Bookmark, BookmarkKind, Page, Space};
 use arch_style::{FontStyle as PageFontStyle, FontWeight as PageFontWeight, TextAlign};
 use archetype_sdk::runtime_client::RuntimeSupervisor;
 use gpui::{
-    AnyElement, AppContext as _, Application, AssetSource, Context, Entity, FontWeight,
+    AnyElement, AppContext as _, Application, AssetSource, BoxShadow, Context, Entity, FontWeight,
     InteractiveElement as _, IntoElement, ParentElement, Render, ScrollHandle, SharedString,
     StatefulInteractiveElement as _, Styled, Subscription, Task, Window, WindowBounds,
     WindowOptions, div, img, point, prelude::FluentBuilder as _, px, rgba, size,
@@ -1860,24 +1860,7 @@ impl QuickBrowser {
         };
         let (x, y) = relative_position(bounds, clip);
         let element = match command {
-            DisplayCommand::Box {
-                background,
-                border,
-                border_width_px,
-                ..
-            } => div()
-                .absolute()
-                .left(px(x))
-                .top(px(y))
-                .w(px(bounds.width))
-                .h(px(bounds.height))
-                .when_some(*background, |layer, color| layer.bg(gpui_color(color)))
-                .when(*border_width_px > 0.0, |layer| {
-                    layer
-                        .border(px(*border_width_px))
-                        .border_color(border.map_or_else(gpui::transparent_black, gpui_color))
-                })
-                .into_any_element(),
+            DisplayCommand::Box { .. } => Self::box_display_command(command, bounds, x, y),
             DisplayCommand::Text {
                 content,
                 size_px,
@@ -1888,6 +1871,7 @@ impl QuickBrowser {
                 font_weight,
                 font_style,
                 text_align,
+                text_decoration,
                 ..
             } => {
                 let text = div()
@@ -1906,6 +1890,14 @@ impl QuickBrowser {
                     .when(*font_style == PageFontStyle::Italic, Styled::italic)
                     .when(*text_align == TextAlign::Center, Styled::text_center)
                     .when(*text_align == TextAlign::End, Styled::text_right)
+                    .when(
+                        *text_decoration == TextDecoration::Underline,
+                        Styled::underline,
+                    )
+                    .when(
+                        *text_decoration == TextDecoration::LineThrough,
+                        Styled::line_through,
+                    )
                     .child(content.clone());
                 if let Some(target) = link.clone() {
                     text.id(SharedString::from(format!(
@@ -1928,10 +1920,62 @@ impl QuickBrowser {
                 source,
                 alt,
                 loaded,
+                opacity,
                 ..
-            } => image_element(bounds, x, y, source, alt, *loaded, image_resources, cx),
+            } => image_element(
+                bounds,
+                x,
+                y,
+                source,
+                alt,
+                *loaded,
+                *opacity,
+                image_resources,
+                cx,
+            ),
         };
         clipped_element(element, clip)
+    }
+
+    fn box_display_command(
+        command: &DisplayCommand,
+        bounds: arch_layout::Rect,
+        x: f32,
+        y: f32,
+    ) -> AnyElement {
+        let DisplayCommand::Box {
+            background,
+            border,
+            border_width_px,
+            border_radius_px,
+            shadow,
+            ..
+        } = command
+        else {
+            unreachable!("box display helper received a non-box command")
+        };
+        div()
+            .absolute()
+            .left(px(x))
+            .top(px(y))
+            .w(px(bounds.width))
+            .h(px(bounds.height))
+            .rounded(px(*border_radius_px))
+            .when_some(*background, |layer, color| layer.bg(gpui_color(color)))
+            .when_some(*shadow, |layer, shadow| {
+                layer.shadow(vec![BoxShadow {
+                    offset: point(px(shadow.offset_x_px), px(shadow.offset_y_px)),
+                    blur_radius: px(shadow.blur_px),
+                    spread_radius: px(0.0),
+                    color: gpui_color(shadow.color),
+                }])
+            })
+            .when(*border_width_px > 0.0, |layer| {
+                layer
+                    .border(px(*border_width_px))
+                    .border_color(border.map_or_else(gpui::transparent_black, gpui_color))
+            })
+            .into_any_element()
     }
 
     fn form_control(
@@ -2057,6 +2101,7 @@ fn image_element(
     source: &str,
     alt: &str,
     loaded: bool,
+    opacity: f32,
     image_resources: &HashMap<String, Vec<u8>>,
     cx: &mut Context<QuickBrowser>,
 ) -> AnyElement {
@@ -2067,6 +2112,7 @@ fn image_element(
             .top(px(y))
             .w(px(bounds.width))
             .h(px(bounds.height))
+            .opacity(opacity)
             .into_any_element();
     }
     div()

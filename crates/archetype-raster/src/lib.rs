@@ -9,7 +9,7 @@ use std::path::Path;
 
 use anyhow::{Context, Result};
 use arch_layout::Rect;
-use arch_paint::{DisplayCommand, PaintColor};
+use arch_paint::{DisplayCommand, PaintColor, PaintShadow, TextDecoration};
 use cosmic_text::{Attrs, Buffer, Color, Family, FontSystem, Metrics, Shaping, SwashCache};
 use image::{Rgba, RgbaImage, imageops::FilterType};
 
@@ -54,13 +54,19 @@ impl Rasterizer {
                     background,
                     border,
                     border_width_px,
+                    border_radius_px,
+                    shadow,
                 } => draw_box(
                     &mut output,
                     *bounds,
                     *clip,
-                    *background,
-                    *border,
-                    *border_width_px,
+                    &BoxPaintStyle {
+                        background: *background,
+                        border: *border,
+                        border_width_px: *border_width_px,
+                        border_radius_px: *border_radius_px,
+                        shadow: *shadow,
+                    },
                 ),
                 DisplayCommand::Text {
                     bounds,
@@ -69,6 +75,7 @@ impl Rasterizer {
                     size_px,
                     color,
                     line_height_px,
+                    text_decoration,
                     ..
                 } => self.draw_text(
                     &mut output,
@@ -83,17 +90,19 @@ impl Rasterizer {
                         alpha: 255,
                     }),
                     *line_height_px,
+                    *text_decoration,
                 ),
                 DisplayCommand::Image {
                     bounds,
                     clip,
                     source,
                     loaded,
+                    opacity,
                     ..
                 } => {
                     if *loaded {
                         if let Some(bytes) = image_resources.get(source) {
-                            draw_image(&mut output, *bounds, *clip, bytes);
+                            draw_image(&mut output, *bounds, *clip, bytes, *opacity);
                         }
                     }
                 }
@@ -112,6 +121,7 @@ impl Rasterizer {
         size_px: f32,
         color: PaintColor,
         line_height_px: f32,
+        text_decoration: TextDecoration,
     ) {
         let metrics = Metrics::new(size_px.max(1.0), line_height_px.max(size_px).max(1.0));
         let mut buffer = Buffer::new(&mut self.font_system, metrics);
@@ -143,6 +153,22 @@ impl Rasterizer {
                     }
                 }
             },
+        );
+        let decoration_y = match text_decoration {
+            TextDecoration::None => return,
+            TextDecoration::Underline => bounds.y + size_px * 1.1,
+            TextDecoration::LineThrough => bounds.y + size_px * 0.55,
+        };
+        fill_rect(
+            output,
+            Rect {
+                x: bounds.x,
+                y: decoration_y,
+                width: bounds.width,
+                height: (size_px / 14.0).max(1.0),
+            },
+            clip,
+            paint_rgba(color),
         );
     }
 }
@@ -184,20 +210,30 @@ pub fn difference_ratio(actual: &RgbaImage, expected: &RgbaImage) -> f64 {
     differing as f64 / f64::from(actual.width() * actual.height())
 }
 
-fn draw_box(
-    output: &mut RgbaImage,
-    bounds: Rect,
-    clip: Option<Rect>,
+struct BoxPaintStyle {
     background: Option<PaintColor>,
     border: Option<PaintColor>,
     border_width_px: f32,
-) {
-    if let Some(background) = background {
-        fill_rect(output, bounds, clip, paint_rgba(background));
+    border_radius_px: f32,
+    shadow: Option<PaintShadow>,
+}
+
+fn draw_box(output: &mut RgbaImage, bounds: Rect, clip: Option<Rect>, style: &BoxPaintStyle) {
+    if let Some(shadow) = style.shadow {
+        draw_shadow(output, bounds, clip, shadow, style.border_radius_px);
     }
-    if border_width_px > 0.0 {
-        if let Some(border) = border {
-            let width = border_width_px.ceil();
+    if let Some(background) = style.background {
+        fill_rounded_rect(
+            output,
+            bounds,
+            clip,
+            paint_rgba(background),
+            style.border_radius_px,
+        );
+    }
+    if style.border_width_px > 0.0 {
+        if let Some(border) = style.border {
+            let width = style.border_width_px.ceil();
             let top = Rect {
                 height: width,
                 ..bounds
@@ -220,7 +256,13 @@ fn draw_box(
     }
 }
 
-fn draw_image(output: &mut RgbaImage, bounds: Rect, clip: Option<Rect>, bytes: &[u8]) {
+fn draw_image(
+    output: &mut RgbaImage,
+    bounds: Rect,
+    clip: Option<Rect>,
+    bytes: &[u8],
+    opacity: f32,
+) {
     let width = positive_dimension(bounds.width);
     let height = positive_dimension(bounds.height);
     let Ok(decoded) = image::load_from_memory(bytes) else {
@@ -236,9 +278,76 @@ fn draw_image(output: &mut RgbaImage, bounds: Rect, clip: Option<Rect>, bytes: &
             output,
             origin_x + i32::try_from(x).unwrap_or(i32::MAX),
             origin_y + i32::try_from(y).unwrap_or(i32::MAX),
-            pixel.0,
+            [
+                pixel[0],
+                pixel[1],
+                pixel[2],
+                (f32::from(pixel[3]) * opacity.clamp(0.0, 1.0)).round() as u8,
+            ],
             clip,
         );
+    }
+}
+
+fn draw_shadow(
+    output: &mut RgbaImage,
+    bounds: Rect,
+    clip: Option<Rect>,
+    shadow: PaintShadow,
+    radius: f32,
+) {
+    let steps = shadow.blur_px.ceil().clamp(1.0, 64.0) as u32;
+    let mut color = paint_rgba(shadow.color);
+    color[3] = u8::try_from(u32::from(color[3]) / steps.max(1))
+        .unwrap_or(1)
+        .max(1);
+    for step in (0..steps).rev() {
+        let spread = step as f32;
+        fill_rounded_rect(
+            output,
+            Rect {
+                x: bounds.x + shadow.offset_x_px - spread,
+                y: bounds.y + shadow.offset_y_px - spread,
+                width: bounds.width + spread * 2.0,
+                height: bounds.height + spread * 2.0,
+            },
+            clip,
+            color,
+            radius + spread,
+        );
+    }
+}
+
+fn fill_rounded_rect(
+    output: &mut RgbaImage,
+    rect: Rect,
+    clip: Option<Rect>,
+    color: [u8; 4],
+    radius: f32,
+) {
+    let radius = radius.max(0.0).min(rect.width / 2.0).min(rect.height / 2.0);
+    if radius <= 0.0 {
+        fill_rect(output, rect, clip, color);
+        return;
+    }
+    let start_x = rect.x.floor().max(0.0) as u32;
+    let start_y = rect.y.floor().max(0.0) as u32;
+    let end_x = (rect.x + rect.width)
+        .ceil()
+        .clamp(0.0, output.width() as f32) as u32;
+    let end_y = (rect.y + rect.height)
+        .ceil()
+        .clamp(0.0, output.height() as f32) as u32;
+    for y in start_y..end_y {
+        for x in start_x..end_x {
+            let px = x as f32 + 0.5;
+            let py = y as f32 + 0.5;
+            let nearest_x = px.clamp(rect.x + radius, rect.x + rect.width - radius);
+            let nearest_y = py.clamp(rect.y + radius, rect.y + rect.height - radius);
+            if (px - nearest_x).powi(2) + (py - nearest_y).powi(2) <= radius.powi(2) {
+                blend_pixel(output, x as i32, y as i32, color, clip);
+            }
+        }
     }
 }
 
@@ -304,5 +413,35 @@ mod tests {
         let mut second = first.clone();
         second.put_pixel(0, 0, Rgba([0, 0, 0, 255]));
         assert!((difference_ratio(&first, &second) - 0.25).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn rounded_translucent_box_preserves_corner_and_blends_center() {
+        let mut image = RgbaImage::from_pixel(20, 20, Rgba([255, 255, 255, 255]));
+        draw_box(
+            &mut image,
+            Rect {
+                x: 2.0,
+                y: 2.0,
+                width: 16.0,
+                height: 16.0,
+            },
+            None,
+            &BoxPaintStyle {
+                background: Some(PaintColor {
+                    red: 255,
+                    green: 0,
+                    blue: 0,
+                    alpha: 128,
+                }),
+                border: None,
+                border_width_px: 0.0,
+                border_radius_px: 6.0,
+                shadow: None,
+            },
+        );
+
+        assert_eq!(image.get_pixel(2, 2), &Rgba([255, 255, 255, 255]));
+        assert_eq!(image.get_pixel(10, 10), &Rgba([255, 127, 127, 255]));
     }
 }
