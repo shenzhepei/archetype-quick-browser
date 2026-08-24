@@ -62,7 +62,7 @@ pub struct StaticDocument {
 }
 
 impl StaticDocument {
-    pub(crate) fn protocol_envelope(&self, request_id: u64) -> Envelope {
+    pub fn protocol_envelope(&self, request_id: u64) -> Envelope {
         Envelope::v4(
             request_id,
             Message::Request(Request::RenderDocument {

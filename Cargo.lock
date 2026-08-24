@@ -111,7 +111,7 @@ dependencies = [
 
 [[package]]
 name = "arch-browser"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "anyhow",
  "arch-css",
@@ -124,6 +124,7 @@ dependencies = [
  "arch-store",
  "arch-style",
  "archetype-protocol",
+ "archetype-sdk",
  "archetype-types",
  "chacha20poly1305",
  "cosmic-text",
@@ -147,7 +148,7 @@ dependencies = [
 
 [[package]]
 name = "arch-css"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "cssparser",
  "serde",
@@ -155,14 +156,14 @@ dependencies = [
 
 [[package]]
 name = "arch-dom"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "serde",
 ]
 
 [[package]]
 name = "arch-html"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "arch-dom",
  "html5ever 0.35.0",
@@ -171,7 +172,7 @@ dependencies = [
 
 [[package]]
 name = "arch-layout"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "arch-css",
  "arch-dom",
@@ -182,7 +183,7 @@ dependencies = [
 
 [[package]]
 name = "arch-net"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "arch-session",
  "reqwest",
@@ -193,7 +194,7 @@ dependencies = [
 
 [[package]]
 name = "arch-paint"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "arch-dom",
  "arch-layout",
@@ -203,7 +204,7 @@ dependencies = [
 
 [[package]]
 name = "arch-session"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "archetype-types",
  "cookie",
@@ -217,7 +218,7 @@ dependencies = [
 
 [[package]]
 name = "arch-store"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "rusqlite",
  "thiserror 2.0.20",
@@ -226,7 +227,7 @@ dependencies = [
 
 [[package]]
 name = "arch-style"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "arch-css",
  "arch-dom",
@@ -236,7 +237,7 @@ dependencies = [
 
 [[package]]
 name = "archetype-protocol"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "arch-paint",
  "archetype-types",
@@ -248,7 +249,7 @@ dependencies = [
 
 [[package]]
 name = "archetype-runtime"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "arch-browser",
  "arch-css",
@@ -259,6 +260,7 @@ dependencies = [
  "arch-paint",
  "arch-style",
  "archetype-protocol",
+ "archetype-sdk",
  "archetype-types",
  "image",
  "serde_json",
@@ -267,8 +269,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "archetype-sdk"
+version = "0.1.0"
+dependencies = [
+ "arch-paint",
+ "archetype-protocol",
+ "archetype-types",
+ "getrandom 0.3.4",
+ "thiserror 2.0.20",
+]
+
+[[package]]
 name = "archetype-types"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "serde",
  "serde_json",

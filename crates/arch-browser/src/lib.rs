@@ -19,7 +19,6 @@ use url::Url;
 use crate::profile_cookies::CookieCipher;
 
 pub mod runtime_broker;
-pub mod runtime_supervisor;
 pub mod snapshot;
 
 mod profile_cookies;

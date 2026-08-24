@@ -12,7 +12,6 @@ use arch_browser::{
     runtime_broker::{
         BrokerRequest, load_form_submission_with_cookies, load_static_document_with_cookies,
     },
-    runtime_supervisor::RuntimeSupervisor,
 };
 use arch_net::{LoadError, LoadErrorKind, Loader};
 use arch_paint::{DisplayCommand, PaintColor};
@@ -21,6 +20,7 @@ use arch_session::cookies::CookieJar;
 use arch_session::forms::{ControlId, ControlKind, FormMethod, FormSubmission};
 use arch_store::{Bookmark, BookmarkKind, Page, Space};
 use arch_style::{FontStyle as PageFontStyle, FontWeight as PageFontWeight, TextAlign};
+use archetype_sdk::runtime_client::RuntimeSupervisor;
 use gpui::{
     AnyElement, AppContext as _, Application, AssetSource, Context, Entity, FontWeight,
     InteractiveElement as _, IntoElement, ParentElement, Render, ScrollHandle, SharedString,

@@ -9,7 +9,7 @@ use archetype_types::{ArchetypeUrl, NavigationId, PageId};
 use thiserror::Error;
 use url::Url;
 
-use crate::runtime_supervisor::StaticDocument;
+use archetype_sdk::runtime_client::StaticDocument;
 
 const DOCUMENT_BYTE_LIMIT: usize = 4 * 1024 * 1024;
 const RESOURCE_BYTE_LIMIT: usize = 4 * 1024 * 1024;

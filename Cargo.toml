@@ -14,11 +14,12 @@ members = [
   "crates/arch-session",
   "crates/arch-store",
   "crates/arch-style",
+  "crates/archetype-sdk",
 ]
 exclude = ["fuzz"]
 
 [workspace.package]
-version = "0.4.0"
+version = "0.5.0"
 edition = "2024"
 license = "Apache-2.0"
 rust-version = "1.85"

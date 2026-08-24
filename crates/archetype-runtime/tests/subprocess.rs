@@ -3,11 +3,11 @@ use std::{
     time::{Duration, Instant},
 };
 
-use arch_browser::{
-    runtime_broker::{BrokerRequest, load_static_document},
-    runtime_supervisor::{RuntimeLimits, RuntimeProcessError, RuntimeSupervisor, StaticDocument},
-};
+use arch_browser::runtime_broker::{BrokerRequest, load_static_document};
 use arch_net::Loader;
+use archetype_sdk::runtime_client::{
+    RuntimeLimits, RuntimeProcessError, RuntimeSupervisor, StaticDocument,
+};
 use archetype_types::{NavigationId, PageId};
 use url::Url;
 
