@@ -7,7 +7,12 @@ rust-version.workspace = true
 
 [dependencies]
 archetype-types = { path = "../archetype-types" }
+cookie.workspace = true
+cookie_store.workspace = true
+psl.workspace = true
 serde.workspace = true
+thiserror.workspace = true
+url.workspace = true
 
 [lints]
 workspace = true

@@ -3,6 +3,8 @@ use std::collections::HashMap;
 pub use archetype_types::{ArchetypeUrl, LoadStage, NavigationId, PageId};
 use serde::{Deserialize, Serialize};
 
+pub mod cookies;
+
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Viewport {
     pub width: f32,

@@ -28,6 +28,8 @@ anyhow = "1.0"
 base64 = "0.22"
 cssparser = "0.37"
 cosmic-text = "0.14.2"
+cookie = "0.18"
+cookie_store = "=0.22.0"
 fontdb = "0.16.2"
 getrandom = "0.3"
 html5ever = "0.35"
@@ -37,6 +39,7 @@ gpui-component-assets = "0.5.1"
 directories = "6.0"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
 markup5ever_rcdom = "0.35"
+psl = "2.1"
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls"] }
 rustls = { version = "0.23", default-features = false, features = ["std"] }
 rusqlite = { version = "0.32", features = ["bundled"] }
