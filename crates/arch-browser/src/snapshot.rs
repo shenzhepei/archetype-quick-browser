@@ -8,13 +8,8 @@ use crate::RenderedPage;
 
 pub use archetype_raster::{HEIGHT, VIEWPORT_WIDTH, WIDTH, difference_ratio, load_snapshot};
 
+#[derive(Default)]
 pub struct SnapshotRenderer(Rasterizer);
-
-impl Default for SnapshotRenderer {
-    fn default() -> Self {
-        Self(Rasterizer::default())
-    }
-}
 
 impl SnapshotRenderer {
     #[must_use]
