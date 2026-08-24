@@ -275,8 +275,10 @@ dependencies = [
  "archetype-protocol",
  "archetype-sdk",
  "archetype-types",
+ "futures-executor",
  "image",
  "serde_json",
+ "sha2 0.10.9",
  "thiserror 2.0.20",
  "url",
 ]
@@ -289,8 +291,12 @@ dependencies = [
  "archetype-protocol",
  "archetype-raster",
  "archetype-types",
+ "futures-executor",
  "getrandom 0.3.4",
+ "image",
+ "sha2 0.10.9",
  "thiserror 2.0.20",
+ "url",
 ]
 
 [[package]]

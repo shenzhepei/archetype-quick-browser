@@ -14,7 +14,13 @@ archetype-raster = { path = "../archetype-raster" }
 archetype-protocol = { path = "../archetype-protocol" }
 archetype-types = { path = "../archetype-types" }
 getrandom.workspace = true
+image.workspace = true
+sha2.workspace = true
 thiserror.workspace = true
+url.workspace = true
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+futures-executor.workspace = true

@@ -405,6 +405,17 @@ impl RuntimeConnection {
         drain_responses(responses, &mut self.pending, &mut self.in_flight_bytes)
     }
 
+    fn connection_failure(
+        &mut self,
+        responses: &Receiver<ReaderEvent>,
+    ) -> Option<RuntimeProcessError> {
+        if let Err(error) = self.drain_responses(responses) {
+            return Some(error);
+        }
+        self.expire_requests()
+            .then_some(RuntimeProcessError::RequestTimedOut)
+    }
+
     fn expire_requests(&mut self) -> bool {
         expire_requests(&mut self.pending, &mut self.in_flight_bytes)
     }
@@ -447,10 +458,7 @@ fn supervise(
             }
             continue;
         }
-        if !ready_sent {
-            let _ = ready.send(Ok(()));
-            ready_sent = true;
-        }
+        notify_ready(ready, &mut ready_sent);
 
         let mut connection = RuntimeConnection::new(input, limits);
         let mut last_resource_sample = Instant::now();
@@ -459,14 +467,9 @@ fn supervise(
         let mut forced_restart = None;
         let mut command_channel_closed = false;
         loop {
-            if let Err(error) = connection.drain_responses(&responses) {
+            if let Some(error) = connection.connection_failure(&responses) {
                 terminal_error = error.clone();
                 connection.fail_pending(&error);
-                break;
-            }
-            if connection.expire_requests() {
-                terminal_error = RuntimeProcessError::RequestTimedOut;
-                connection.fail_pending(&terminal_error);
                 break;
             }
             if last_resource_sample.elapsed() >= RESOURCE_SAMPLE_INTERVAL {
@@ -527,6 +530,13 @@ fn supervise(
             finish_supervision(control, commands, &terminal_error);
             return;
         }
+    }
+}
+
+fn notify_ready(ready: &SyncSender<Result<(), RuntimeProcessError>>, ready_sent: &mut bool) {
+    if !*ready_sent {
+        let _ = ready.send(Ok(()));
+        *ready_sent = true;
     }
 }
 

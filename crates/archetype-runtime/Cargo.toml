@@ -23,6 +23,8 @@ arch-browser = { path = "../arch-browser" }
 arch-net = { path = "../arch-net" }
 archetype-sdk = { path = "../archetype-sdk", features = ["internal-runtime-client"] }
 archetype-types = { path = "../archetype-types" }
+futures-executor.workspace = true
+sha2.workspace = true
 url.workspace = true
 
 [lints]
