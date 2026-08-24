@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "status": "developer_preview",
+  "sdk_version": "0.1.0",
+  "sdk_compatibility": "0.1.x",
+  "protocol_major": 4,
+  "protocol_minor": 0,
+  "runtime_compatibility": "0.5.x",
+  "targets": ["aarch64-apple-darwin"],
+  "frame": {
+    "format": "rgba8",
+    "ownership": "sdk_owned",
+    "transport": "internal_display_list_then_sdk_raster"
+  },
+  "runtime_discovery": ["explicit_path", "same_executable_directory"],
+  "integrity": ["optional_sha256"],
+  "excluded": [
+    "sdk_1_0_compatibility",
+    "javascript",
+    "runtime_network_access",
+    "production_code_signing",
+    "notarization",
+    "windows",
+    "linux"
+  ]
+}

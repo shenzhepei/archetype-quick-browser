@@ -17,7 +17,7 @@ English | [简体中文](README-zh-CN.md)
 Archetype Quick Browser is a developer-preview desktop browser for static HTML documents. Its
 Rust workspace provides a GPUI/gpui-component shell, a brokered Renderer Runtime, encrypted Cookie
 profiles, basic forms, Flexbox, hibernating tabs, constrained local and HTTP(S) loading, and
-PNG/JPEG display.
+PNG/JPEG display. V5 also provides an executor-neutral Rust SDK with owned RGBA frames.
 
 > [!NOTE]
 > This project is an engine prototype for development and experimentation, not a production web
@@ -38,6 +38,7 @@ _Deterministic Archetype rendering preview from the checked-in V3 fixture corpus
 - Browser-brokered GET/POST sessions with encrypted persistent Cookies and basic interactive forms.
 - A supervised Renderer Runtime with bounded IPC, crash recovery, macOS sandbox probes, and metadata-only tab hibernation.
 - Flexbox direction, wrapping, alignment, growth, shrinkage, and gaps.
+- `archetype-sdk 0.1` Engine/Page APIs, Runtime lifecycle, structured events, integrity checks, and RGBA8 frames.
 
 ## Run
 
@@ -112,6 +113,14 @@ cargo llvm-cov --workspace --lcov --output-path coverage/lcov.info
 The `V4 Acceptance` workflow runs the 50-page variant of the one-minute trend probe together with
 the Runtime recovery, sandbox, entitlement, support-matrix, and workspace quality gates.
 
+To run the V5 UI-neutral partner example:
+
+```bash
+cargo build -p archetype-runtime --bin archetype-runtime
+cargo run -p archetype-sdk --example partner_render -- \
+  target/debug/archetype-runtime artifacts/sdk-partner.png
+```
+
 ## Architecture
 
 The workspace separates browser concerns into focused crates:
@@ -119,6 +128,7 @@ The workspace separates browser concerns into focused crates:
 | Crate | Responsibility |
 | --- | --- |
 | `archetype-types`, `archetype-protocol` | Stable values, framed IPC, negotiation, routing, and bounded transports |
+| `archetype-sdk`, `archetype-raster` | UI-neutral async client, Runtime lifecycle, owned RGBA frames, and deterministic rasterization |
 | `archetype-runtime` | Static document renderer subprocess and framed command loop |
 | `arch-browser` | Desktop shell, orchestration, localization, and rendering integration |
 | `arch-html`, `arch-dom` | HTML parsing and document representation |
@@ -137,6 +147,9 @@ The scoped product requirements and detailed implementation plans are in:
   [machine-readable report](docs/v3-acceptance-report.json)
 - [`docs/v4-acceptance.md`](docs/v4-acceptance.md), its [machine-readable resource report](docs/v4-acceptance-report.json),
   and the machine-readable [HTML/CSS support matrix](docs/html-css-support.json)
+- [`docs/prd/06-Archetype-V5-Rust-SDK预览-PRD.md`](docs/prd/06-Archetype-V5-Rust-SDK预览-PRD.md),
+  its [detailed design](docs/detailed-design/06-Archetype-V5-Rust-SDK预览详设.md),
+  [acceptance evidence](docs/v5-acceptance.md), and [compatibility matrix](docs/sdk-compatibility.json)
 
 ## V3 Status
 
@@ -169,6 +182,18 @@ The scoped product requirements and detailed implementation plans are in:
   and are developer previews rather than public production distributions.
 - JavaScript, Grid, media, complete forms, public SDK compatibility, production signing,
   notarization, and automatic updates remain outside V4 scope.
+
+## V5 Status
+
+- V5 complete: `archetype-sdk 0.1.0` starts and authenticates Runtime `0.5.x`, creates independent
+  pages, validates bounded same-origin inputs, rejects stale navigation results, publishes
+  structured events, and returns tightly packed owned RGBA8 frames without exposing GPUI, DOM,
+  layout, DisplayList, or protocol types.
+- The partner example renders English, Chinese, and Flexbox content to PNG. SDK-level failure tests
+  cover correct and incorrect Runtime SHA-256, graceful shutdown, disconnect events, event pressure,
+  and 100 terminate/restart/render cycles.
+- V5 remains an Apple Silicon macOS developer preview. SDK 1.0, JavaScript, Runtime-owned network,
+  production signing, notarization, Windows, Linux, shared-memory frames, and GPU handles are not implemented.
 
 ## License
 

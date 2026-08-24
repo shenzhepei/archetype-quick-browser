@@ -4,7 +4,7 @@
 |----|------|
 | 规范号 | 06 |
 | 版本 | V5 / `archetype-sdk 0.1` 开发者预览 |
-| 状态 | 实施基线 |
+| 状态 | 已完成 |
 | 日期 | 2026-08-24 |
 | 对应详设 | [06-Archetype-V5-Rust-SDK预览详设.md](../detailed-design/06-Archetype-V5-Rust-SDK预览详设.md) |
 

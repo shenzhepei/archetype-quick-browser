@@ -5,7 +5,7 @@
 | 规范号 | 06 |
 | 对应 PRD | [06-Archetype-V5-Rust-SDK预览-PRD.md](../prd/06-Archetype-V5-Rust-SDK预览-PRD.md) |
 | 版本 | V5 / `archetype-sdk 0.1` 开发者预览 |
-| 状态 | 实施基线 |
+| 状态 | 已完成 |
 | 日期 | 2026-08-24 |
 
 ---
@@ -161,7 +161,7 @@ SDK 构建时版本为 `0.1.0`，工作区其他 crate 为 `0.5.0`。V5 不测�
 
 ## 12. 完成定义
 
-V5 完成必须满足 06 PRD 全部验收项，同时不降低 V4 Browser、Runtime、沙箱、表单、Flexbox、休眠和发行证据。SDK 0.1 只能标记开发者预览，不得宣称 04 长期架构、生产签名或 JavaScript 已完成。
+V5 已按 A1 至 E1 完成 06 PRD 验收：Runtime client 由 SDK 所有，公开 Future/Engine/Page/Frame/Event/Error 边界、共享确定性 rasterizer、合作方 PNG 示例、机器兼容矩阵、rustdoc、旧导航过滤、流式摘要验证、断连事件和 100 次 SDK 重启均有自动化证据。V4 Browser、Runtime、沙箱、表单、Flexbox、休眠和发行证据保持通过。SDK 0.1 只能标记开发者预览，不得宣称 04 长期架构、生产签名或 JavaScript 已完成。
 
 ## 13. 相关文档
 

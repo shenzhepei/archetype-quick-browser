@@ -17,6 +17,7 @@
 Archetype Quick Browser 是一个面向静态 HTML 文档的开发者预览版桌面浏览器。其 Rust
 工作区提供基于 GPUI/gpui-component 的桌面外壳、经 broker 管理的 Renderer Runtime、
 加密 Cookie 配置、基础表单、Flexbox、标签休眠、受限的本地与 HTTP(S) 加载以及 PNG/JPEG 显示。
+V5 还提供不绑定执行器的 Rust SDK 和自有 RGBA 帧。
 
 > [!NOTE]
 > 本项目是用于开发和实验的浏览器引擎原型，并非生产级 Web 浏览器。当前桌面应用和 CI
@@ -37,6 +38,7 @@ _来自仓库内 V3 固定测试语料的 Archetype 确定性渲染预览。_
 - 由 Browser broker 管理的 GET/POST 会话、加密持久 Cookie 和基础交互表单。
 - 带有界 IPC、崩溃恢复、macOS 沙箱探针和纯元数据标签休眠的 Renderer Runtime。
 - Flexbox 方向、换行、对齐、增长、收缩和间距。
+- `archetype-sdk 0.1` Engine/Page API、Runtime 生命周期、结构化事件、完整性校验和 RGBA8 帧。
 
 ## 运行
 
@@ -107,6 +109,14 @@ cargo llvm-cov --workspace --lcov --output-path coverage/lcov.info
 `V4 Acceptance` 工作流会运行 50 页版本的一分钟趋势探针，并同时执行 Runtime 恢复、沙箱、
 entitlement、支持矩阵和工作区质量闸门。
 
+运行 V5 UI 框架无关的合作方示例：
+
+```bash
+cargo build -p archetype-runtime --bin archetype-runtime
+cargo run -p archetype-sdk --example partner_render -- \
+  target/debug/archetype-runtime artifacts/sdk-partner.png
+```
+
 ## 架构
 
 工作区按浏览器职责拆分为多个专用 crate：
@@ -114,6 +124,7 @@ entitlement、支持矩阵和工作区质量闸门。
 | Crate | 职责 |
 | --- | --- |
 | `archetype-types`、`archetype-protocol` | 稳定值对象、分帧 IPC、协商、路由和有界 transport |
+| `archetype-sdk`、`archetype-raster` | UI 无关异步客户端、Runtime 生命周期、自有 RGBA 帧和确定性栅格 |
 | `archetype-runtime` | 静态文档 Renderer 子进程与分帧命令循环 |
 | `arch-browser` | 桌面外壳、编排、本地化和渲染集成 |
 | `arch-html`、`arch-dom` | HTML 解析和文档表示 |
@@ -132,6 +143,9 @@ entitlement、支持矩阵和工作区质量闸门。
   [机器可读报告](docs/v3-acceptance-report.json)
 - [`docs/v4-acceptance.md`](docs/v4-acceptance.md)、对应的[机器可读资源报告](docs/v4-acceptance-report.json)
   和机器可读的 [HTML/CSS 支持矩阵](docs/html-css-support.json)
+- [`docs/prd/06-Archetype-V5-Rust-SDK预览-PRD.md`](docs/prd/06-Archetype-V5-Rust-SDK预览-PRD.md)、
+  对应的[详细设计](docs/detailed-design/06-Archetype-V5-Rust-SDK预览详设.md)、
+  [验收证据](docs/v5-acceptance.md)和[兼容矩阵](docs/sdk-compatibility.json)
 
 ## V3 状态
 
@@ -157,6 +171,16 @@ entitlement、支持矩阵和工作区质量闸门。
 - Release 工作流会打包两个必需二进制、SHA-256 校验和、验收证据、许可证和机器可读支持矩阵。
   其产物未签名、未公证，属于开发者预览而非面向公众的生产发行。
 - JavaScript、Grid、媒体、完整表单、公开 SDK 兼容、生产签名、公证和自动更新仍不属于 V4 范围。
+
+## V5 状态
+
+- V5 已完成：`archetype-sdk 0.1.0` 可启动并认证 Runtime `0.5.x`、创建独立页面、校验有界
+  同源输入、拒绝旧导航结果、发布结构化事件，并在不暴露 GPUI、DOM、布局、DisplayList 或协议
+  类型的前提下返回紧密排列且由 SDK 持有的 RGBA8 帧。
+- 合作方示例可将英文、中文和 Flexbox 内容渲染为 PNG。SDK 故障测试覆盖正确/错误 Runtime
+  SHA-256、优雅关闭、断连事件、事件压力和 100 次终止/重启/再渲染。
+- V5 仍是 Apple Silicon macOS 开发者预览。SDK 1.0、JavaScript、Runtime 自主管理网络、生产
+  签名、公证、Windows、Linux、共享内存帧和 GPU 句柄均未实现。
 
 ## 许可证
 
