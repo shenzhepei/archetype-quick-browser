@@ -632,9 +632,19 @@ fn inline_css(document: &arch_dom::Document) -> String {
 
 #[cfg(test)]
 mod tests {
-    use std::fs;
+    use std::{collections::BTreeMap, fs};
 
     use super::*;
+
+    #[derive(serde::Deserialize)]
+    struct FixtureExpectation {
+        title: String,
+        text: String,
+        link_ends_with: Option<String>,
+        loaded_image_ends_with: Option<String>,
+        #[serde(default)]
+        diagnostic_contains: Vec<String>,
+    }
 
     #[test]
     fn render_errors_classify_parse_and_viewport_failures() {
@@ -694,14 +704,77 @@ mod tests {
     }
 
     #[test]
-    fn every_fixture_document_renders_without_failure() {
+    fn every_fixture_document_matches_corpus_expectations() {
         let pages = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/pages");
+        let expectations: BTreeMap<String, FixtureExpectation> =
+            serde_json::from_str(&fs::read_to_string(pages.join("expectations.json")).unwrap())
+                .unwrap();
+        assert_eq!(
+            expectations.len(),
+            30,
+            "fixture manifest must contain 30 pages"
+        );
+
+        let mut fixture_directories = fs::read_dir(&pages)
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .filter(|path| path.is_dir())
+            .collect::<Vec<_>>();
+        fixture_directories.sort();
+        assert_eq!(
+            fixture_directories.len(),
+            30,
+            "fixture corpus must contain 30 directories"
+        );
+
         let mut documents = Vec::new();
-        for directory in fs::read_dir(pages).unwrap() {
-            let directory = directory.unwrap().path();
-            if !directory.is_dir() {
-                continue;
+        let loader = Loader::default();
+        for directory in fixture_directories {
+            let name = directory.file_name().unwrap().to_str().unwrap();
+            let expectation = expectations
+                .get(name)
+                .unwrap_or_else(|| panic!("missing fixture expectation for {name}"));
+            let index = directory.join("index.html");
+            assert!(index.is_file(), "{name} is missing index.html");
+            let rendered = render_url(&loader, &Url::from_file_path(&index).unwrap(), 1280.0)
+                .unwrap_or_else(|error| panic!("{} failed: {error}", index.display()));
+            assert_eq!(
+                rendered.title, expectation.title,
+                "unexpected title for {name}"
+            );
+            assert!(
+                rendered.display_list.commands.iter().any(|command| {
+                    matches!(command, arch_paint::DisplayCommand::Text { content, .. } if content.contains(&expectation.text))
+                }),
+                "{name} did not paint expected text {:?}",
+                expectation.text
+            );
+            if let Some(expected) = &expectation.link_ends_with {
+                assert!(
+                    rendered.display_list.commands.iter().any(|command| {
+                        matches!(command, arch_paint::DisplayCommand::Text { link: Some(link), .. } if link.ends_with(expected))
+                    }),
+                    "{name} did not resolve a link ending with {expected:?}"
+                );
             }
+            if let Some(expected) = &expectation.loaded_image_ends_with {
+                assert!(
+                    rendered.display_list.commands.iter().any(|command| {
+                        matches!(command, arch_paint::DisplayCommand::Image { source, loaded: true, .. } if source.ends_with(expected))
+                    }),
+                    "{name} did not load an image ending with {expected:?}"
+                );
+            }
+            for expected in &expectation.diagnostic_contains {
+                assert!(
+                    rendered
+                        .diagnostics
+                        .iter()
+                        .any(|diagnostic| diagnostic.contains(expected)),
+                    "{name} did not report diagnostic containing {expected:?}"
+                );
+            }
+
             for entry in fs::read_dir(directory).unwrap() {
                 let path = entry.unwrap().path();
                 if path.extension().and_then(|value| value.to_str()) == Some("html") {
@@ -710,8 +783,7 @@ mod tests {
             }
         }
         documents.sort();
-        assert!(documents.len() >= 13, "fixture corpus unexpectedly shrank");
-        let loader = Loader::default();
+        assert!(documents.len() >= 30, "fixture corpus unexpectedly shrank");
         for document in documents {
             let url = Url::from_file_path(&document).unwrap();
             let rendered = render_url(&loader, &url, 1280.0)
