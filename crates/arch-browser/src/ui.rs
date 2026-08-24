@@ -3,6 +3,7 @@ use std::{
     collections::{HashMap, HashSet},
     io::Write as _,
     path::PathBuf,
+    sync::Arc,
 };
 
 use arch_browser::{
@@ -14,7 +15,7 @@ use arch_store::{Bookmark, BookmarkKind, Page, Space};
 use arch_style::{FontStyle as PageFontStyle, FontWeight as PageFontWeight, TextAlign};
 use gpui::{
     AnyElement, AppContext as _, Application, AssetSource, Context, Entity, FontWeight,
-    InteractiveElement as _, IntoElement, ParentElement, Render, SharedString,
+    InteractiveElement as _, IntoElement, ParentElement, Render, ScrollHandle, SharedString,
     StatefulInteractiveElement as _, Styled, Subscription, Task, Window, WindowBounds,
     WindowOptions, div, img, prelude::FluentBuilder as _, px, rgba, size,
 };
@@ -228,6 +229,7 @@ struct QuickBrowser {
     error: Option<ErrorView>,
     loading_pages: HashSet<String>,
     navigation_tasks: HashMap<String, Task<()>>,
+    tab_scroll: ScrollHandle,
     address_input: Entity<InputState>,
     space_input: Entity<InputState>,
     folder_input: Entity<InputState>,
@@ -317,6 +319,7 @@ impl QuickBrowser {
             error: None,
             loading_pages: HashSet::new(),
             navigation_tasks: HashMap::new(),
+            tab_scroll: ScrollHandle::new(),
             address_input,
             space_input,
             folder_input,
@@ -467,6 +470,7 @@ impl QuickBrowser {
             Ok(page) => {
                 self.selected_page = Some(page.id.clone());
                 self.pages.push(page);
+                self.scroll_to_selected_tab();
                 self.set_address(url.to_string(), window, cx);
                 self.persist_selection();
                 self.navigate_to(&url, window, cx);
@@ -481,6 +485,7 @@ impl QuickBrowser {
     fn select_page(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
         self.error = None;
         self.selected_page = Some(id.to_owned());
+        self.scroll_to_selected_tab();
         let page = self.selected_page_record().cloned();
         let address = page
             .as_ref()
@@ -516,6 +521,7 @@ impl QuickBrowser {
         self.pages.retain(|item| item.id != id);
         if closing_selected {
             self.selected_page = adjacent_page;
+            self.scroll_to_selected_tab();
             let next_page = self.selected_page_record().cloned();
             let address = next_page
                 .as_ref()
@@ -604,6 +610,7 @@ impl QuickBrowser {
     }
 
     fn restore_selected_page(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.scroll_to_selected_tab();
         if let Some(page) = self.selected_page_record().cloned() {
             self.reload_page(page, window, cx);
         }
@@ -726,6 +733,16 @@ impl QuickBrowser {
     fn selected_page_record(&self) -> Option<&Page> {
         let id = self.selected_page.as_deref()?;
         self.pages.iter().find(|page| page.id == id)
+    }
+
+    fn scroll_to_selected_tab(&self) {
+        if let Some(index) = self
+            .pages
+            .iter()
+            .position(|page| self.selected_page.as_deref() == Some(page.id.as_str()))
+        {
+            self.tab_scroll.scroll_to_item(index);
+        }
     }
 
     fn bookmark_current_page(&mut self, parent_id: Option<&str>, cx: &mut Context<Self>) {
@@ -1069,6 +1086,7 @@ impl QuickBrowser {
             .child(
                 h_flex()
                     .id("tab-list")
+                    .track_scroll(&self.tab_scroll)
                     .flex_1()
                     .min_w_0()
                     .overflow_x_scroll()
@@ -1382,7 +1400,11 @@ impl QuickBrowser {
 
         let mut layers = Vec::with_capacity(rendered.display_list.commands.len());
         for command in &rendered.display_list.commands {
-            layers.push(Self::display_command(command, cx));
+            layers.push(Self::display_command(
+                command,
+                &rendered.image_resources,
+                cx,
+            ));
         }
         let canvas = div()
             .relative()
@@ -1423,7 +1445,11 @@ impl QuickBrowser {
             .into_any_element()
     }
 
-    fn display_command(command: &DisplayCommand, cx: &mut Context<Self>) -> AnyElement {
+    fn display_command(
+        command: &DisplayCommand,
+        image_resources: &HashMap<String, Vec<u8>>,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let (bounds, clip) = match command {
             DisplayCommand::Box { bounds, clip, .. }
             | DisplayCommand::Text { bounds, clip, .. }
@@ -1500,31 +1526,42 @@ impl QuickBrowser {
                 alt,
                 loaded,
                 ..
-            } => {
-                if *loaded {
-                    img(image_source(source))
-                        .absolute()
-                        .left(px(x))
-                        .top(px(y))
-                        .w(px(bounds.width))
-                        .h(px(bounds.height))
-                        .into_any_element()
-                } else {
-                    div()
-                        .absolute()
-                        .left(px(x))
-                        .top(px(y))
-                        .w(px(bounds.width))
-                        .h(px(bounds.height))
-                        .text_sm()
-                        .text_color(cx.theme().muted_foreground)
-                        .child(alt.clone())
-                        .into_any_element()
-                }
-            }
+            } => image_element(bounds, x, y, source, alt, *loaded, image_resources, cx),
         };
         clipped_element(element, clip)
     }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn image_element(
+    bounds: arch_layout::Rect,
+    x: f32,
+    y: f32,
+    source: &str,
+    alt: &str,
+    loaded: bool,
+    image_resources: &HashMap<String, Vec<u8>>,
+    cx: &mut Context<QuickBrowser>,
+) -> AnyElement {
+    if loaded && let Some(bytes) = image_resources.get(source) {
+        return img(image_source(bytes))
+            .absolute()
+            .left(px(x))
+            .top(px(y))
+            .w(px(bounds.width))
+            .h(px(bounds.height))
+            .into_any_element();
+    }
+    div()
+        .absolute()
+        .left(px(x))
+        .top(px(y))
+        .w(px(bounds.width))
+        .h(px(bounds.height))
+        .text_sm()
+        .text_color(cx.theme().muted_foreground)
+        .child(alt.to_owned())
+        .into_any_element()
 }
 
 fn clipped_element(element: AnyElement, clip: Option<arch_layout::Rect>) -> AnyElement {
@@ -1805,15 +1842,13 @@ fn gpui_color(color: PaintColor) -> gpui::Hsla {
     .into()
 }
 
-fn image_source(source: &str) -> gpui::ImageSource {
-    Url::parse(source)
-        .ok()
-        .and_then(|url| {
-            (url.scheme() == "file")
-                .then(|| url.to_file_path().ok())
-                .flatten()
-        })
-        .map_or_else(|| source.to_owned().into(), Into::into)
+fn image_source(bytes: &[u8]) -> gpui::ImageSource {
+    let format = if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
+        gpui::ImageFormat::Png
+    } else {
+        gpui::ImageFormat::Jpeg
+    };
+    Arc::new(gpui::Image::from_bytes(format, bytes.to_vec())).into()
 }
 
 #[cfg(test)]
