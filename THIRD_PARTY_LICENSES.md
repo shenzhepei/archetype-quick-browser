@@ -5,6 +5,7 @@ Generated from the locked Cargo dependency graph. Regenerate with `cargo run -p 
 | Package | Version | License | Source |
 | --- | --- | --- | --- |
 | `adler2` | `2.0.1` | `0BSD OR MIT OR Apache-2.0` | <https://github.com/oyvindln/adler2> |
+| `aead` | `0.5.2` | `MIT OR Apache-2.0` | <https://github.com/RustCrypto/traits> |
 | `aes` | `0.8.4` | `MIT OR Apache-2.0` | <https://github.com/RustCrypto/block-ciphers> |
 | `ahash` | `0.8.12` | `MIT OR Apache-2.0` | <https://github.com/tkaitchuck/ahash> |
 | `aho-corasick` | `1.1.5` | `Unlicense OR MIT` | <https://github.com/BurntSushi/aho-corasick> |
@@ -83,6 +84,8 @@ Generated from the locked Cargo dependency graph. Regenerate with `cargo run -p 
 | `cfg_aliases` | `0.2.2` | `MIT` | <https://github.com/katharostech/cfg_aliases> |
 | `cgl` | `0.3.2` | `MIT / Apache-2.0` | <https://github.com/servo/cgl-rs> |
 | `chacha20` | `0.10.1` | `MIT OR Apache-2.0` | <https://github.com/RustCrypto/stream-ciphers> |
+| `chacha20` | `0.9.1` | `Apache-2.0 OR MIT` | <https://github.com/RustCrypto/stream-ciphers> |
+| `chacha20poly1305` | `0.10.1` | `Apache-2.0 OR MIT` | <https://github.com/RustCrypto/AEADs/tree/master/chacha20poly1305> |
 | `chrono` | `0.4.45` | `MIT OR Apache-2.0` | <https://github.com/chronotope/chrono> |
 | `cipher` | `0.4.4` | `MIT OR Apache-2.0` | <https://github.com/RustCrypto/traits> |
 | `clang-sys` | `1.9.1` | `Apache-2.0` | <https://github.com/KyleMayes/clang-sys> |
@@ -100,6 +103,8 @@ Generated from the locked Cargo dependency graph. Regenerate with `cargo run -p 
 | `const-random` | `0.1.18` | `MIT OR Apache-2.0` | <https://github.com/tkaitchuck/constrandom> |
 | `const-random-macro` | `0.1.16` | `MIT OR Apache-2.0` | <https://github.com/tkaitchuck/constrandom> |
 | `convert_case` | `0.4.0` | `MIT` | <https://github.com/rutrum/convert-case> |
+| `cookie` | `0.18.2` | `MIT OR Apache-2.0` | <https://github.com/SergioBenitez/cookie-rs> |
+| `cookie_store` | `0.22.0` | `MIT OR Apache-2.0` | <https://github.com/pfernie/cookie_store> |
 | `core-foundation` | `0.10.0` | `MIT OR Apache-2.0` | <https://github.com/servo/core-foundation-rs> |
 | `core-foundation` | `0.9.4` | `MIT OR Apache-2.0` | <https://github.com/servo/core-foundation-rs> |
 | `core-foundation-sys` | `0.8.7` | `MIT OR Apache-2.0` | <https://github.com/servo/core-foundation-rs> |
@@ -129,6 +134,7 @@ Generated from the locked Cargo dependency graph. Regenerate with `cargo run -p 
 | `ctor-proc-macro` | `0.0.6` | `Apache-2.0 OR MIT` | <https://github.com/mmastrac/rust-ctor> |
 | `data-url` | `0.3.2` | `MIT OR Apache-2.0` | <https://github.com/servo/rust-url> |
 | `deflate64` | `0.1.12` | `MIT` | <https://github.com/anatawa12/deflate64-rs> |
+| `deranged` | `0.4.0` | `MIT OR Apache-2.0` | <https://github.com/jhpratt/deranged> |
 | `derive_more` | `0.99.20` | `MIT` | <https://github.com/JelteF/derive_more> |
 | `digest` | `0.10.7` | `MIT OR Apache-2.0` | <https://github.com/RustCrypto/traits> |
 | `digest` | `0.11.3` | `MIT OR Apache-2.0` | <https://github.com/RustCrypto/traits> |
@@ -142,6 +148,7 @@ Generated from the locked Cargo dependency graph. Regenerate with `cargo run -p 
 | `dispatch2` | `0.3.1` | `Zlib OR Apache-2.0 OR MIT` | <https://github.com/madsmtm/objc2> |
 | `displaydoc` | `0.2.7` | `MIT OR Apache-2.0` | <https://github.com/yaahc/displaydoc> |
 | `dlib` | `0.5.3` | `MIT` | <https://github.com/elinorbgr/dlib> |
+| `document-features` | `0.2.12` | `MIT OR Apache-2.0` | <https://github.com/slint-ui/document-features> |
 | `downcast-rs` | `1.2.1` | `MIT/Apache-2.0` | <https://github.com/marcianx/downcast-rs> |
 | `dtoa` | `1.0.11` | `MIT OR Apache-2.0` | <https://github.com/dtolnay/dtoa> |
 | `dtoa-short` | `0.3.5` | `MPL-2.0` | <https://github.com/upsuper/dtoa-short> |
@@ -314,6 +321,7 @@ Generated from the locked Cargo dependency graph. Regenerate with `cargo run -p 
 | `linux-raw-sys` | `0.12.1` | `Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT` | <https://github.com/sunfishcode/linux-raw-sys> |
 | `linux-raw-sys` | `0.4.15` | `Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT` | <https://github.com/sunfishcode/linux-raw-sys> |
 | `litemap` | `0.8.2` | `Unicode-3.0` | <https://github.com/unicode-org/icu4x> |
+| `litrs` | `1.0.0` | `MIT OR Apache-2.0` | <https://github.com/LukasKalbertodt/litrs> |
 | `lock_api` | `0.4.14` | `MIT OR Apache-2.0` | <https://github.com/Amanieu/parking_lot> |
 | `log` | `0.4.33` | `MIT OR Apache-2.0` | <https://github.com/rust-lang/log> |
 | `loop9` | `0.1.5` | `MIT` | <https://gitlab.com/kornelski/loop9.git> |
@@ -362,6 +370,7 @@ Generated from the locked Cargo dependency graph. Regenerate with `cargo run -p 
 | `num-bigint` | `0.4.8` | `MIT OR Apache-2.0` | <https://github.com/rust-num/num-bigint> |
 | `num-bigint-dig` | `0.8.6` | `MIT/Apache-2.0` | <https://github.com/dignifiedquire/num-bigint> |
 | `num-complex` | `0.4.6` | `MIT OR Apache-2.0` | <https://github.com/rust-num/num-complex> |
+| `num-conv` | `0.1.0` | `MIT OR Apache-2.0` | <https://github.com/jhpratt/num-conv> |
 | `num-derive` | `0.4.2` | `MIT OR Apache-2.0` | <https://github.com/rust-num/num-derive> |
 | `num-integer` | `0.1.47` | `MIT OR Apache-2.0` | <https://github.com/rust-num/num-integer> |
 | `num-iter` | `0.1.46` | `MIT OR Apache-2.0` | <https://github.com/rust-num/num-iter> |
@@ -383,6 +392,7 @@ Generated from the locked Cargo dependency graph. Regenerate with `cargo run -p 
 | `object` | `0.39.1` | `Apache-2.0 OR MIT` | <https://github.com/gimli-rs/object> |
 | `once_cell` | `1.21.4` | `MIT OR Apache-2.0` | <https://github.com/matklad/once_cell> |
 | `oo7` | `0.5.0` | `MIT` | <https://github.com/bilelmoussaoui/oo7> |
+| `opaque-debug` | `0.3.1` | `MIT OR Apache-2.0` | <https://github.com/RustCrypto/utils> |
 | `open` | `5.4.1` | `MIT` | <https://github.com/Byron/open-rs> |
 | `openssl-probe` | `0.2.1` | `MIT OR Apache-2.0` | <https://github.com/rustls/openssl-probe> |
 | `option-ext` | `0.2.0` | `MPL-2.0` | <https://github.com/soc/option-ext.git> |
@@ -415,8 +425,10 @@ Generated from the locked Cargo dependency graph. Regenerate with `cargo run -p 
 | `png` | `0.18.1` | `MIT OR Apache-2.0` | <https://github.com/image-rs/image-png> |
 | `polling` | `3.11.0` | `Apache-2.0 OR MIT` | <https://github.com/smol-rs/polling> |
 | `pollster` | `0.2.5` | `Apache-2.0/MIT` | <https://github.com/zesterer/pollster> |
+| `poly1305` | `0.8.0` | `Apache-2.0 OR MIT` | <https://github.com/RustCrypto/universal-hashes> |
 | `postage` | `0.5.0` | `MIT` | <https://github.com/austinjones/postage-rs> |
 | `potential_utf` | `0.1.5` | `Unicode-3.0` | <https://github.com/unicode-org/icu4x> |
+| `powerfmt` | `0.2.0` | `MIT OR Apache-2.0` | <https://github.com/jhpratt/powerfmt> |
 | `ppv-lite86` | `0.2.21` | `MIT OR Apache-2.0` | <https://github.com/cryptocorrosion/cryptocorrosion> |
 | `precomputed-hash` | `0.1.1` | `MIT` | <https://github.com/emilio/precomputed-hash> |
 | `prettyplease` | `0.2.37` | `MIT OR Apache-2.0` | <https://github.com/dtolnay/prettyplease> |
@@ -426,7 +438,10 @@ Generated from the locked Cargo dependency graph. Regenerate with `cargo run -p 
 | `proc-macro2` | `1.0.107` | `MIT OR Apache-2.0` | <https://github.com/dtolnay/proc-macro2> |
 | `profiling` | `1.0.18` | `MIT OR Apache-2.0` | <https://github.com/aclysma/profiling> |
 | `profiling-procmacros` | `1.0.18` | `MIT OR Apache-2.0` | <https://github.com/aclysma/profiling> |
+| `psl` | `2.1.226` | `MIT/Apache-2.0` | <https://github.com/addr-rs/psl> |
+| `psl-types` | `2.0.11` | `MIT/Apache-2.0` | <https://github.com/addr-rs/psl-types> |
 | `psm` | `0.1.32` | `MIT OR Apache-2.0` | <https://github.com/rust-lang/stacker/> |
+| `publicsuffix` | `2.3.0` | `MIT/Apache-2.0` | <https://github.com/rushmorem/publicsuffix> |
 | `pulp` | `0.22.3` | `MIT` | <https://github.com/sarah-quinones/pulp/> |
 | `pulp-wasm-simd-flag` | `0.1.1` | `MIT` | <https://github.com/sarah-quinones/pulp/> |
 | `pxfm` | `0.1.30` | `BSD-3-Clause OR Apache-2.0` | <https://github.com/awxkee/pxfm> |
@@ -503,8 +518,8 @@ Generated from the locked Cargo dependency graph. Regenerate with `cargo run -p 
 | `screencapturekit` | `0.2.8` | `MIT OR Apache-2.0` | <https://github.com/svtlabs/screencapturekit-rs/tree/main/screencapturekit> |
 | `screencapturekit-sys` | `0.2.8` | `MIT OR Apache-2.0` | <https://github.com/svtlabs/screencapturekit-rs/tree/main/screencapturekit-sys> |
 | `seahash` | `4.1.0` | `MIT` | <https://gitlab.redox-os.org/redox-os/seahash> |
-| `security-framework` | `3.7.0` | `MIT OR Apache-2.0` | <https://github.com/kornelski/rust-security-framework> |
-| `security-framework-sys` | `2.17.0` | `MIT OR Apache-2.0` | <https://github.com/kornelski/rust-security-framework> |
+| `security-framework` | `3.5.1` | `MIT OR Apache-2.0` | <https://github.com/kornelski/rust-security-framework> |
+| `security-framework-sys` | `2.15.0` | `MIT OR Apache-2.0` | <https://github.com/kornelski/rust-security-framework> |
 | `self_cell` | `1.3.0` | `Apache-2.0 OR GPL-2.0-only` | <https://github.com/Voultapher/self_cell> |
 | `semver` | `1.0.28` | `MIT OR Apache-2.0` | <https://github.com/dtolnay/semver> |
 | `serde` | `1.0.229` | `MIT OR Apache-2.0` | <https://github.com/serde-rs/serde> |
@@ -585,6 +600,9 @@ Generated from the locked Cargo dependency graph. Regenerate with `cargo run -p 
 | `thiserror-impl` | `1.0.69` | `MIT OR Apache-2.0` | <https://github.com/dtolnay/thiserror> |
 | `thiserror-impl` | `2.0.20` | `MIT OR Apache-2.0` | <https://github.com/dtolnay/thiserror> |
 | `tiff` | `0.11.3` | `MIT` | <https://github.com/image-rs/image-tiff> |
+| `time` | `0.3.41` | `MIT OR Apache-2.0` | <https://github.com/time-rs/time> |
+| `time-core` | `0.1.4` | `MIT OR Apache-2.0` | <https://github.com/time-rs/time> |
+| `time-macros` | `0.2.22` | `MIT OR Apache-2.0` | <https://github.com/time-rs/time> |
 | `tiny-keccak` | `2.0.2` | `CC0-1.0` | <https://github.com/debris/tiny-keccak> |
 | `tiny-skia` | `0.11.4` | `BSD-3-Clause` | <https://github.com/RazrFalcon/tiny-skia> |
 | `tiny-skia-path` | `0.11.4` | `BSD-3-Clause` | <https://github.com/RazrFalcon/tiny-skia/tree/master/path> |
@@ -636,6 +654,7 @@ Generated from the locked Cargo dependency graph. Regenerate with `cargo run -p 
 | `unicode-segmentation` | `1.13.3` | `MIT OR Apache-2.0` | <https://github.com/unicode-rs/unicode-segmentation> |
 | `unicode-vo` | `0.1.0` | `MIT/Apache-2.0` | <https://github.com/RazrFalcon/unicode-vo> |
 | `unicode-width` | `0.1.14` | `MIT OR Apache-2.0` | <https://github.com/unicode-rs/unicode-width> |
+| `universal-hash` | `0.5.1` | `MIT OR Apache-2.0` | <https://github.com/RustCrypto/traits> |
 | `unsafe-libyaml` | `0.2.11` | `MIT` | <https://github.com/dtolnay/unsafe-libyaml> |
 | `untrusted` | `0.9.0` | `ISC` | <https://github.com/briansmith/untrusted> |
 | `url` | `2.5.8` | `MIT OR Apache-2.0` | <https://github.com/servo/rust-url> |

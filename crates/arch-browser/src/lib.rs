@@ -4,15 +4,22 @@ use anyhow::{Context, Result};
 use arch_dom::NodeKind;
 use arch_net::{LoadError, LoadErrorKind, Loader};
 use arch_paint::DisplayList;
-use arch_session::{BrowserCommand, BrowserEvent, Session};
+use arch_session::{
+    BrowserCommand, BrowserEvent, Session,
+    cookies::{CookieJar, CookieRequest},
+};
 use arch_store::{Bookmark, Page, Space, Store};
 use archetype_types::{ArchetypeUrl, LoadStage, NavigationId, PageId};
 use thiserror::Error;
 use url::Url;
 
+use crate::profile_cookies::CookieCipher;
+
 pub mod runtime_broker;
 pub mod runtime_supervisor;
 pub mod snapshot;
+
+mod profile_cookies;
 
 const IMAGE_LIMIT: usize = 20 * 1024 * 1024;
 const PAGE_LIMIT: usize = 50 * 1024 * 1024;
@@ -66,6 +73,8 @@ pub struct BrowserCore {
     store: Store,
     session: Session,
     loader: Loader,
+    cookie_jar: CookieJar,
+    cookie_cipher: CookieCipher,
 }
 
 #[derive(Clone, Debug)]
@@ -88,8 +97,11 @@ impl BrowserCore {
     /// # Errors
     /// Returns an error when the profile database or network client cannot be initialized.
     pub fn open(profile: impl AsRef<Path>) -> Result<Self> {
+        let profile = profile.as_ref();
+        let cookie_cipher = CookieCipher::for_profile(profile)
+            .context("could not open profile Cookie encryption key")?;
         let store = Store::open(profile).context("could not open browser profile")?;
-        Self::with_store(store)
+        Self::with_store(store, cookie_cipher)
     }
 
     /// Creates an in-memory browser profile for tests.
@@ -97,14 +109,26 @@ impl BrowserCore {
     /// # Errors
     /// Returns an error when the profile database or network client cannot be initialized.
     pub fn in_memory() -> Result<Self> {
-        Self::with_store(Store::in_memory()?)
+        Self::with_store(Store::in_memory()?, CookieCipher::ephemeral()?)
     }
 
-    fn with_store(store: Store) -> Result<Self> {
+    fn with_store(store: Store, cookie_cipher: CookieCipher) -> Result<Self> {
+        let cookie_jar = match store.cookie_state()? {
+            Some(state) => {
+                let plaintext = cookie_cipher
+                    .decrypt(&state)
+                    .context("could not decrypt profile Cookie state")?;
+                CookieJar::from_persistent_json(&plaintext)
+                    .context("could not restore profile Cookie state")?
+            }
+            None => CookieJar::new(),
+        };
         let mut core = Self {
             store,
             session: Session::default(),
             loader: Loader::new()?,
+            cookie_jar,
+            cookie_cipher,
         };
         for page in core.store.pages()? {
             if let Ok(id) = page.id.parse::<PageId>() {
@@ -116,6 +140,37 @@ impl BrowserCore {
             }
         }
         Ok(core)
+    }
+
+    #[must_use]
+    pub fn cookie_header(&self, request: CookieRequest<'_>) -> Option<String> {
+        self.cookie_jar.request_header(request)
+    }
+
+    /// Applies one HTTP `Set-Cookie` header and persists the resulting profile state.
+    ///
+    /// # Errors
+    /// Returns an error when the Cookie is invalid, encryption fails, or the database update
+    /// cannot be committed.
+    pub fn store_response_cookie(&mut self, response_url: &Url, header: &str) -> Result<()> {
+        self.cookie_jar
+            .store_response_header(response_url, header)
+            .context("could not apply response Cookie")?;
+        self.persist_cookie_jar()
+    }
+
+    fn persist_cookie_jar(&self) -> Result<()> {
+        let plaintext = self
+            .cookie_jar
+            .persistent_json()
+            .context("could not serialize profile Cookie state")?;
+        let encrypted = self
+            .cookie_cipher
+            .encrypt(&plaintext)
+            .context("could not encrypt profile Cookie state")?;
+        self.store
+            .save_cookie_state(&encrypted)
+            .context("could not persist profile Cookie state")
     }
 
     /// Creates and persists a Space.
@@ -736,6 +791,7 @@ mod tests {
     use std::{collections::BTreeMap, fs};
 
     use super::*;
+    use arch_session::cookies::RequestMethod;
     use uuid::Uuid;
 
     #[derive(serde::Deserialize)]
@@ -1188,6 +1244,49 @@ mod tests {
             core.forward(&page, 1280.0).unwrap().title,
             "Cascade fixture"
         );
+    }
+
+    #[test]
+    fn application_core_encrypts_and_restores_persistent_cookies() {
+        let path = std::env::temp_dir().join(format!("archetype-cookies-{}.db", Uuid::now_v7()));
+        let origin = Url::parse("https://example.com/account").unwrap();
+        let key = [9; 32];
+        {
+            let store = Store::open(&path).unwrap();
+            let mut core =
+                BrowserCore::with_store(store, profile_cookies::CookieCipher::from_key(key))
+                    .unwrap();
+            core.store_response_cookie(
+                &origin,
+                "session=plain-secret; Secure; HttpOnly; Expires=Tue, 03 Aug 2100 00:38:37 GMT",
+            )
+            .unwrap();
+        }
+        let database = fs::read(&path).unwrap();
+        assert!(
+            !database
+                .windows(b"plain-secret".len())
+                .any(|window| window == b"plain-secret")
+        );
+
+        let restored = BrowserCore::with_store(
+            Store::open(&path).unwrap(),
+            profile_cookies::CookieCipher::from_key(key),
+        )
+        .unwrap();
+        assert_eq!(
+            restored.cookie_header(CookieRequest {
+                url: &origin,
+                top_level_url: &origin,
+                method: RequestMethod::Get,
+                is_top_level_navigation: true,
+            }),
+            Some("session=plain-secret".to_owned())
+        );
+        drop(restored);
+        let _ = fs::remove_file(&path);
+        let _ = fs::remove_file(path.with_extension("db-shm"));
+        let _ = fs::remove_file(path.with_extension("db-wal"));
     }
 
     #[test]

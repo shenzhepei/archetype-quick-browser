@@ -42,10 +42,17 @@ CREATE TABLE IF NOT EXISTS app_state (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS cookie_state (
+  id INTEGER PRIMARY KEY CHECK(id = 1),
+  nonce BLOB NOT NULL CHECK(length(nonce) = 24),
+  ciphertext BLOB NOT NULL CHECK(length(ciphertext) > 0),
+  updated_at INTEGER NOT NULL
+);
 INSERT OR IGNORE INTO schema_migrations(version, applied_at)
 VALUES
   (1, CAST(unixepoch('subsec') * 1000 AS INTEGER)),
-  (2, CAST(unixepoch('subsec') * 1000 AS INTEGER));
+  (2, CAST(unixepoch('subsec') * 1000 AS INTEGER)),
+  (3, CAST(unixepoch('subsec') * 1000 AS INTEGER));
 ";
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -89,6 +96,12 @@ pub struct Bookmark {
     pub position: i64,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct EncryptedCookieState {
+    pub nonce: Vec<u8>,
+    pub ciphertext: Vec<u8>,
+}
+
 #[derive(Debug, Error)]
 pub enum StoreError {
     #[error("database error: {0}")]
@@ -104,7 +117,7 @@ pub struct Store {
 }
 
 impl Store {
-    /// Opens or creates a schema-v2 database.
+    /// Opens or creates a schema-v3 database.
     ///
     /// # Errors
     /// Returns [`StoreError`] when `SQLite` cannot open, configure, or migrate the database.
@@ -131,7 +144,7 @@ impl Store {
         Ok(Self { connection })
     }
 
-    /// Creates an isolated schema-v2 database for tests and transient use.
+    /// Creates an isolated schema-v3 database for tests and transient use.
     ///
     /// # Errors
     /// Returns [`StoreError`] when `SQLite` cannot create, configure, or migrate the database.
@@ -337,6 +350,39 @@ impl Store {
                 })
             })?
             .collect::<Result<_, _>>()?)
+    }
+
+    /// Replaces the profile's encrypted persistent Cookie state.
+    ///
+    /// # Errors
+    /// Returns [`StoreError`] when the nonce or ciphertext violates the schema or `SQLite` cannot
+    /// execute the update.
+    pub fn save_cookie_state(&self, state: &EncryptedCookieState) -> Result<(), StoreError> {
+        self.connection.execute(
+            "INSERT INTO cookie_state(id, nonce, ciphertext, updated_at) VALUES (1, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET nonce = excluded.nonce, ciphertext = excluded.ciphertext, updated_at = excluded.updated_at",
+            params![state.nonce, state.ciphertext, now_ms()],
+        )?;
+        Ok(())
+    }
+
+    /// Loads the profile's encrypted persistent Cookie state.
+    ///
+    /// # Errors
+    /// Returns [`StoreError`] when `SQLite` cannot execute the query.
+    pub fn cookie_state(&self) -> Result<Option<EncryptedCookieState>, StoreError> {
+        Ok(self
+            .connection
+            .query_row(
+                "SELECT nonce, ciphertext FROM cookie_state WHERE id = 1",
+                [],
+                |row| {
+                    Ok(EncryptedCookieState {
+                        nonce: row.get(0)?,
+                        ciphertext: row.get(1)?,
+                    })
+                },
+            )
+            .optional()?)
     }
 
     /// Inserts a URL bookmark into a Space folder or its root.
@@ -583,7 +629,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn initializes_empty_database_through_schema_v2() {
+    fn initializes_empty_database_through_schema_v3() {
         let store = Store::in_memory().unwrap();
         let mut statement = store
             .connection
@@ -594,7 +640,25 @@ mod tests {
             .unwrap()
             .collect::<Result<Vec<_>, _>>()
             .unwrap();
-        assert_eq!(versions, [1, 2]);
+        assert_eq!(versions, [1, 2, 3]);
+    }
+
+    #[test]
+    fn stores_only_encrypted_cookie_state() {
+        let store = Store::in_memory().unwrap();
+        let first = EncryptedCookieState {
+            nonce: vec![1; 24],
+            ciphertext: b"encrypted-cookie-state".to_vec(),
+        };
+        store.save_cookie_state(&first).unwrap();
+        assert_eq!(store.cookie_state().unwrap(), Some(first));
+
+        let replacement = EncryptedCookieState {
+            nonce: vec![2; 24],
+            ciphertext: b"replacement-ciphertext".to_vec(),
+        };
+        store.save_cookie_state(&replacement).unwrap();
+        assert_eq!(store.cookie_state().unwrap(), Some(replacement));
     }
 
     #[test]

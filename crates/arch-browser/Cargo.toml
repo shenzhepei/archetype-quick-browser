@@ -19,6 +19,7 @@ arch-paint = { path = "../arch-paint" }
 arch-session = { path = "../arch-session" }
 arch-store = { path = "../arch-store" }
 arch-style = { path = "../arch-style" }
+chacha20poly1305.workspace = true
 cosmic-text.workspace = true
 directories.workspace = true
 fontdb.workspace = true
@@ -29,10 +30,15 @@ gpui-component-assets.workspace = true
 image.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+sha2.workspace = true
 sys-locale.workspace = true
 thiserror.workspace = true
 url.workspace = true
 uuid.workspace = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+security-framework = "=3.5.1"
+security-framework-sys = "=2.15.0"
 
 [lints]
 workspace = true
