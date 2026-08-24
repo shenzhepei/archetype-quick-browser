@@ -11,6 +11,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@nightly
-      - uses: taiki-e/install-action@cargo-fuzz
-      - run: cargo fuzz run html -- -max_total_time=20 -timeout=5
-      - run: cargo fuzz run css -- -max_total_time=20 -timeout=5
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-fuzz
+      - run: cargo +nightly fuzz run html -- -max_total_time=20 -timeout=5
+      - run: cargo +nightly fuzz run css -- -max_total_time=20 -timeout=5
