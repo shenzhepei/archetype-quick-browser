@@ -4,6 +4,7 @@ pub use archetype_types::{ArchetypeUrl, LoadStage, NavigationId, PageId};
 use serde::{Deserialize, Serialize};
 
 pub mod cookies;
+pub mod forms;
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Viewport {
