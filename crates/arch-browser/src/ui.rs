@@ -8,9 +8,11 @@ use std::{
 };
 
 use arch_browser::{
-    BrowserCore, PendingNavigation, RenderError, RenderErrorKind, RenderedPage,
+    AppearancePreference, BrowserCore, PendingNavigation, RenderError, RenderErrorKind,
+    RenderedPage,
     runtime_broker::{
-        BrokerRequest, load_form_submission_with_cookies, load_static_document_with_cookies,
+        BrokerRequest, load_favicon_with_cookies, load_form_submission_with_cookies,
+        load_static_document_with_cookies,
     },
 };
 use arch_net::{LoadError, LoadErrorKind, Loader};
@@ -29,7 +31,7 @@ use gpui::{
 };
 use gpui_component::{
     ActiveTheme as _, Disableable as _, Icon, IconName, IconNamed, Root, Sizable as _,
-    StyledExt as _, TitleBar,
+    StyledExt as _, Theme, ThemeMode, TitleBar,
     button::{Button, ButtonVariants as _},
     checkbox::Checkbox,
     h_flex,
@@ -231,6 +233,7 @@ pub fn run() {
 
 struct QuickBrowser {
     language: Language,
+    appearance: AppearancePreference,
     core: BrowserCore,
     runtime: Option<Arc<RuntimeSupervisor>>,
     spaces: Vec<Space>,
@@ -278,6 +281,8 @@ impl QuickBrowser {
             eprintln!("profile unavailable at {}: {error}", profile.display());
             BrowserCore::in_memory().expect("in-memory profile must initialize")
         });
+        let appearance = core.appearance_preference().unwrap_or_default();
+        apply_appearance(appearance, window, cx);
         let runtime = start_runtime();
         let mut spaces = core.spaces().unwrap_or_default();
         if spaces.is_empty() {
@@ -324,26 +329,12 @@ impl QuickBrowser {
         let folder_input = cx
             .new(|cx| InputState::new(window, cx).placeholder(language.folder_name_placeholder()));
 
-        let subscriptions = vec![
-            cx.subscribe_in(&address_input, window, |this, _, event, window, cx| {
-                if matches!(event, InputEvent::PressEnter { .. }) {
-                    this.navigate_current(window, cx);
-                }
-            }),
-            cx.subscribe_in(&space_input, window, |this, _, event, window, cx| {
-                if matches!(event, InputEvent::PressEnter { .. }) {
-                    this.rename_selected_space(window, cx);
-                }
-            }),
-            cx.subscribe_in(&folder_input, window, |this, _, event, _window, cx| {
-                if matches!(event, InputEvent::PressEnter { .. }) {
-                    this.save_bookmark_editor(cx);
-                }
-            }),
-        ];
+        let subscriptions =
+            Self::input_subscriptions(window, cx, &address_input, &space_input, &folder_input);
 
         Self {
             language,
+            appearance,
             core,
             runtime,
             spaces,
@@ -371,6 +362,37 @@ impl QuickBrowser {
         }
     }
 
+    fn input_subscriptions(
+        window: &mut Window,
+        cx: &mut Context<Self>,
+        address_input: &Entity<InputState>,
+        space_input: &Entity<InputState>,
+        folder_input: &Entity<InputState>,
+    ) -> Vec<Subscription> {
+        vec![
+            cx.observe_window_appearance(window, |this, window, cx| {
+                if this.appearance == AppearancePreference::System {
+                    Theme::sync_system_appearance(Some(window), cx);
+                }
+            }),
+            cx.subscribe_in(address_input, window, |this, _, event, window, cx| {
+                if matches!(event, InputEvent::PressEnter { .. }) {
+                    this.navigate_current(window, cx);
+                }
+            }),
+            cx.subscribe_in(space_input, window, |this, _, event, window, cx| {
+                if matches!(event, InputEvent::PressEnter { .. }) {
+                    this.rename_selected_space(window, cx);
+                }
+            }),
+            cx.subscribe_in(folder_input, window, |this, _, event, _window, cx| {
+                if matches!(event, InputEvent::PressEnter { .. }) {
+                    this.save_bookmark_editor(cx);
+                }
+            }),
+        ]
+    }
+
     fn set_address(
         &self,
         value: impl Into<SharedString>,
@@ -379,6 +401,22 @@ impl QuickBrowser {
     ) {
         self.address_input
             .update(cx, |input, cx| input.set_value(value, window, cx));
+    }
+
+    fn set_appearance(
+        &mut self,
+        appearance: AppearancePreference,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let Err(error) = self.core.set_appearance_preference(appearance) {
+            self.error = Some(ErrorView::application(self.language, &error));
+            cx.notify();
+            return;
+        }
+        self.appearance = appearance;
+        apply_appearance(appearance, window, cx);
+        cx.notify();
     }
 
     fn set_space_name(
@@ -782,11 +820,15 @@ impl QuickBrowser {
                                 &top_level_url,
                             )?
                         };
-                        let metadata = arch_browser::render_html(
-                            &Url::parse(document.url.as_str())?,
+                        let final_url = Url::parse(document.url.as_str())?;
+                        let favicon_png = load_favicon_with_cookies(
+                            &loader,
                             &document.html,
-                            960.0,
+                            &final_url,
+                            &mut cookie_jar,
+                            &top_level_url,
                         );
+                        let metadata = arch_browser::render_html(&final_url, &document.html, 960.0);
                         let rendered = runtime
                             .render_document(document)
                             .recv_timeout(Duration::from_secs(6))??;
@@ -797,6 +839,7 @@ impl QuickBrowser {
                                 display_list: rendered.display_list,
                                 diagnostics: rendered.diagnostics,
                                 image_resources: rendered.image_resources,
+                                favicon_png,
                                 forms: metadata.forms,
                                 form_controls: metadata.form_controls,
                             },
@@ -841,9 +884,10 @@ impl QuickBrowser {
                 if let Some(cookie_jar) = completed.cookie_jar
                     && let Err(error) = self.core.commit_cookie_jar_snapshot(cookie_jar)
                 {
-                    self.error = Some(ErrorView::application(self.language, &error));
-                    cx.notify();
-                    return;
+                    logging::render_diagnostic(
+                        Some(&page.id),
+                        &format!("could not persist Cookie state: {error:#}"),
+                    );
                 }
                 let rendered = completed.rendered;
                 match self.core.finish_navigation(page, pending, &rendered) {
@@ -1329,6 +1373,11 @@ impl QuickBrowser {
             } else {
                 page.title.clone()
             };
+            let favicon = self
+                .rendered_pages
+                .get(&page.id)
+                .and_then(|rendered| rendered.favicon_png.as_deref())
+                .map(image_source);
             h_flex()
                 .id(SharedString::from(format!("tab-{}", page.id)))
                 .h(px(28.0))
@@ -1351,6 +1400,9 @@ impl QuickBrowser {
                     cx.theme().tab_bar
                 })
                 .rounded(cx.theme().radius)
+                .when_some(favicon, |tab, favicon| {
+                    tab.child(img(favicon).w(px(16.0)).h(px(16.0)))
+                })
                 .child(
                     div()
                         .flex_1()
@@ -1391,17 +1443,17 @@ impl QuickBrowser {
                     .min_w_0()
                     .overflow_x_scroll()
                     .gap_1()
-                    .children(tabs),
-            )
-            .child(
-                Button::new("new-tab")
-                    .ghost()
-                    .icon(AppIcon::Add)
-                    .xsmall()
-                    .tooltip(self.language.new_tab())
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        this.add_page(window, cx);
-                    })),
+                    .children(tabs)
+                    .child(
+                        Button::new("new-tab")
+                            .ghost()
+                            .icon(AppIcon::Add)
+                            .xsmall()
+                            .tooltip(self.language.new_tab())
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.add_page(window, cx);
+                            })),
+                    ),
             )
             .into_any_element()
     }
@@ -1567,14 +1619,6 @@ impl QuickBrowser {
         let loading = current.is_some_and(|page| self.loading_pages.contains(&page.id));
         let can_back = current.is_some_and(|page| self.core.can_go_back(page));
         let can_forward = current.is_some_and(|page| self.core.can_go_forward(page));
-        let bookmark_folders = self
-            .bookmarks
-            .iter()
-            .filter(|bookmark| bookmark.kind == BookmarkKind::Folder)
-            .cloned()
-            .collect::<Vec<_>>();
-        let browser = cx.entity();
-        let language = self.language;
         h_flex()
             .h(px(54.0))
             .w_full()
@@ -1621,47 +1665,94 @@ impl QuickBrowser {
                         this.navigate_history(HistoryDirection::Reload, window, cx);
                     }))
             })
+            .child(self.address_control(current.is_some(), cx))
+            .child(self.appearance_control(cx))
+            .into_any_element()
+    }
+
+    fn address_control(&self, has_page: bool, cx: &mut Context<Self>) -> AnyElement {
+        let bookmark_folders = self
+            .bookmarks
+            .iter()
+            .filter(|bookmark| bookmark.kind == BookmarkKind::Folder)
+            .cloned()
+            .collect::<Vec<_>>();
+        let bookmark_browser = cx.entity();
+        let language = self.language;
+        div()
+            .flex_1()
+            .rounded_lg()
+            .bg(cx.theme().secondary)
             .child(
-                div().flex_1().rounded_lg().bg(cx.theme().secondary).child(
-                    Input::new(&self.address_input)
-                        .appearance(false)
-                        .cleanable(true),
-                ),
+                Input::new(&self.address_input)
+                    .appearance(false)
+                    .cleanable(false)
+                    .suffix(
+                        Button::new("bookmark-current-page")
+                            .ghost()
+                            .icon(AppIcon::Star)
+                            .tooltip(language.bookmark_current_page())
+                            .disabled(!has_page || self.selected_space.is_none())
+                            .dropdown_menu(move |menu, window, cx| {
+                                let root_browser = bookmark_browser.clone();
+                                let mut menu = menu.item(
+                                    PopupMenuItem::new(language.bookmark_bar())
+                                        .icon(Icon::new(AppIcon::Star))
+                                        .on_click(move |_, _, cx| {
+                                            root_browser.update(cx, |this, cx| {
+                                                this.bookmark_current_page(None, cx);
+                                            });
+                                        }),
+                                );
+                                for folder in &bookmark_folders {
+                                    menu = add_bookmark_destination_menu_item(
+                                        menu,
+                                        folder,
+                                        &bookmark_browser,
+                                        language,
+                                        window,
+                                        cx,
+                                    );
+                                }
+                                menu
+                            }),
+                    ),
             )
-            .child(
-                Button::new("bookmark-current-page")
-                    .ghost()
-                    .icon(AppIcon::Star)
-                    .tooltip(self.language.bookmark_current_page())
-                    .disabled(current.is_none() || self.selected_space.is_none())
-                    .dropdown_menu(move |menu, window, cx| {
-                        let root_browser = browser.clone();
-                        let mut menu = menu.item(
-                            PopupMenuItem::new(language.bookmark_bar())
-                                .icon(Icon::new(AppIcon::Star))
-                                .on_click(move |_, _, cx| {
-                                    root_browser.update(cx, |this, cx| {
-                                        this.bookmark_current_page(None, cx);
-                                    });
-                                }),
-                        );
-                        for folder in &bookmark_folders {
-                            menu = add_bookmark_destination_menu_item(
-                                menu, folder, &browser, language, window, cx,
-                            );
-                        }
-                        menu
-                    }),
-            )
-            .child(
-                Button::new("navigate")
-                    .primary()
-                    .icon(AppIcon::Forward)
-                    .tooltip(self.language.navigate())
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        this.navigate_current(window, cx);
-                    })),
-            )
+            .into_any_element()
+    }
+
+    fn appearance_control(&self, cx: &mut Context<Self>) -> AnyElement {
+        let settings_browser = cx.entity();
+        let language = self.language;
+        let appearance = self.appearance;
+        Button::new("profile-settings")
+            .ghost()
+            .icon(IconName::CircleUser)
+            .tooltip(language.settings())
+            .dropdown_menu(move |menu, _, _| {
+                let system_browser = settings_browser.clone();
+                let light_browser = settings_browser.clone();
+                let dark_browser = settings_browser.clone();
+                menu.item(PopupMenuItem::label(language.appearance()))
+                    .item(appearance_menu_item(
+                        language.system_appearance(),
+                        appearance == AppearancePreference::System,
+                        AppearancePreference::System,
+                        system_browser,
+                    ))
+                    .item(appearance_menu_item(
+                        language.light_appearance(),
+                        appearance == AppearancePreference::Light,
+                        AppearancePreference::Light,
+                        light_browser,
+                    ))
+                    .item(appearance_menu_item(
+                        language.dark_appearance(),
+                        appearance == AppearancePreference::Dark,
+                        AppearancePreference::Dark,
+                        dark_browser,
+                    ))
+            })
             .into_any_element()
     }
 
@@ -2061,6 +2152,29 @@ fn profile_path() -> PathBuf {
     let base = logging::data_dir();
     let _ = std::fs::create_dir_all(&base);
     base.join("profile.db")
+}
+
+fn apply_appearance(appearance: AppearancePreference, window: &mut Window, cx: &mut gpui::App) {
+    match appearance {
+        AppearancePreference::System => Theme::sync_system_appearance(Some(window), cx),
+        AppearancePreference::Light => Theme::change(ThemeMode::Light, Some(window), cx),
+        AppearancePreference::Dark => Theme::change(ThemeMode::Dark, Some(window), cx),
+    }
+}
+
+fn appearance_menu_item(
+    label: &'static str,
+    checked: bool,
+    appearance: AppearancePreference,
+    browser: Entity<QuickBrowser>,
+) -> PopupMenuItem {
+    PopupMenuItem::new(label)
+        .checked(checked)
+        .on_click(move |_, window, cx| {
+            browser.update(cx, |this, cx| {
+                this.set_appearance(appearance, window, cx);
+            });
+        })
 }
 
 fn start_runtime() -> Option<Arc<RuntimeSupervisor>> {

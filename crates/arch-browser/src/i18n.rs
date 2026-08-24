@@ -139,12 +139,28 @@ impl Language {
         self.select("停止加载", "Stop loading")
     }
 
-    pub(crate) const fn navigate(self) -> &'static str {
-        self.select("前往", "Go")
-    }
-
     pub(crate) const fn bookmark_current_page(self) -> &'static str {
         self.select("收藏当前页面", "Bookmark this page")
+    }
+
+    pub(crate) const fn settings(self) -> &'static str {
+        self.select("设置", "Settings")
+    }
+
+    pub(crate) const fn appearance(self) -> &'static str {
+        self.select("外观", "Appearance")
+    }
+
+    pub(crate) const fn system_appearance(self) -> &'static str {
+        self.select("跟随系统", "Use system setting")
+    }
+
+    pub(crate) const fn light_appearance(self) -> &'static str {
+        self.select("浅色", "Light")
+    }
+
+    pub(crate) const fn dark_appearance(self) -> &'static str {
+        self.select("深色", "Dark")
     }
 
     pub(crate) const fn remove_bookmark(self) -> &'static str {

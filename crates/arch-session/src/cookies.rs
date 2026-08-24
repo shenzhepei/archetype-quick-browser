@@ -98,6 +98,13 @@ impl CookieJar {
         Ok(output)
     }
 
+    #[must_use]
+    pub fn has_persistent_cookies(&self) -> bool {
+        self.store
+            .iter_any()
+            .any(cookie_store::Cookie::is_persistent)
+    }
+
     /// Restores persistent cookies from a previously serialized profile value.
     ///
     /// # Errors

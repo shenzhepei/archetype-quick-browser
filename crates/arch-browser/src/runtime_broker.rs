@@ -1,4 +1,4 @@
-use std::{collections::BTreeSet, str};
+use std::{collections::BTreeSet, io::Cursor, str};
 
 use arch_dom::NodeKind;
 use arch_net::{LoadError, Loader};
@@ -14,6 +14,7 @@ use archetype_sdk::runtime_client::StaticDocument;
 const DOCUMENT_BYTE_LIMIT: usize = 4 * 1024 * 1024;
 const RESOURCE_BYTE_LIMIT: usize = 4 * 1024 * 1024;
 const TOTAL_RESOURCE_BYTE_LIMIT: usize = 8 * 1024 * 1024;
+const FAVICON_BYTE_LIMIT: usize = 1024 * 1024;
 
 #[derive(Clone, Debug)]
 pub struct BrokerRequest {
@@ -109,6 +110,59 @@ pub fn load_form_submission_with_cookies(
         Ok(response)
     };
     load_static_document_with(request, &mut load)
+}
+
+pub fn load_favicon_with_cookies(
+    loader: &Loader,
+    html: &str,
+    base: &Url,
+    cookie_jar: &mut CookieJar,
+    top_level_url: &Url,
+) -> Option<Vec<u8>> {
+    let document = arch_html::parse(html);
+    let explicit_favicon = document.descendants(document.root()).find_map(|node| {
+        let NodeKind::Element(element) = &node.kind else {
+            return None;
+        };
+        (element.name == "link"
+            && element.attribute("rel").is_some_and(|value| {
+                value
+                    .split_whitespace()
+                    .any(|item| item.eq_ignore_ascii_case("icon"))
+            }))
+        .then(|| element.attribute("href"))
+        .flatten()
+        .and_then(|value| base.join(value).ok())
+    });
+    let favicon = explicit_favicon.or_else(|| default_favicon_url(base))?;
+    if !same_origin(base, &favicon) {
+        return None;
+    }
+    let response = loader
+        .load_with_cookies(
+            &favicon,
+            FAVICON_BYTE_LIMIT,
+            cookie_jar,
+            top_level_url,
+            false,
+        )
+        .ok()?;
+    if !same_origin(base, &response.final_url) {
+        return None;
+    }
+    let decoded = image::load_from_memory(&response.body).ok()?;
+    let mut png = Cursor::new(Vec::new());
+    decoded
+        .thumbnail(32, 32)
+        .write_to(&mut png, image::ImageFormat::Png)
+        .ok()?;
+    Some(png.into_inner())
+}
+
+fn default_favicon_url(base: &Url) -> Option<Url> {
+    matches!(base.scheme(), "http" | "https")
+        .then(|| base.join("/favicon.ico").ok())
+        .flatten()
 }
 
 fn load_static_document_with(
@@ -438,5 +492,59 @@ mod tests {
         assert_eq!(document.url.as_str(), target.as_str());
         assert!(document.html.contains("Posted"));
         assert_eq!(document.resources.len(), 1);
+    }
+
+    #[test]
+    fn loads_and_normalizes_default_favicon() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let mut favicon = Cursor::new(Vec::new());
+        image::DynamicImage::new_rgba8(64, 64)
+            .write_to(&mut favicon, image::ImageFormat::Png)
+            .unwrap();
+        let favicon = favicon.into_inner();
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = [0_u8; 2048];
+            let length = stream.read(&mut request).unwrap();
+            assert!(String::from_utf8_lossy(&request[..length]).starts_with("GET /favicon.ico "));
+            write!(
+                stream,
+                "HTTP/1.1 200 OK\r\nContent-Type: image/png\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                favicon.len()
+            )
+            .unwrap();
+            stream.write_all(&favicon).unwrap();
+        });
+        let page = Url::parse(&format!("http://{address}/index.html")).unwrap();
+
+        let favicon = load_favicon_with_cookies(
+            &Loader::default(),
+            "<title>Page</title>",
+            &page,
+            &mut CookieJar::new(),
+            &page,
+        )
+        .unwrap();
+
+        server.join().unwrap();
+        let decoded = image::load_from_memory(&favicon).unwrap();
+        assert_eq!((decoded.width(), decoded.height()), (32, 32));
+    }
+
+    #[test]
+    fn ignores_cross_origin_favicon() {
+        let page = Url::parse("https://example.com/index.html").unwrap();
+
+        assert!(
+            load_favicon_with_cookies(
+                &Loader::default(),
+                "<link rel='icon' href='https://assets.example.net/favicon.png'>",
+                &page,
+                &mut CookieJar::new(),
+                &page,
+            )
+            .is_none()
+        );
     }
 }

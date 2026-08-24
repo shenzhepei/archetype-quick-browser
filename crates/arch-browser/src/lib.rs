@@ -33,6 +33,7 @@ pub struct RenderedPage {
     pub display_list: DisplayList,
     pub diagnostics: Vec<String>,
     pub image_resources: HashMap<String, Vec<u8>>,
+    pub favicon_png: Option<Vec<u8>>,
     pub forms: Vec<FormState>,
     pub form_controls: Vec<PositionedFormControl>,
 }
@@ -89,6 +90,32 @@ pub struct BrowserCore {
     cookie_cipher: CookieCipher,
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum AppearancePreference {
+    #[default]
+    System,
+    Light,
+    Dark,
+}
+
+impl AppearancePreference {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::System => "system",
+            Self::Light => "light",
+            Self::Dark => "dark",
+        }
+    }
+
+    fn parse(value: Option<&str>) -> Self {
+        match value {
+            Some("light") => Self::Light,
+            Some("dark") => Self::Dark,
+            _ => Self::System,
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct PendingNavigation {
     page_id: PageId,
@@ -132,6 +159,25 @@ impl BrowserCore {
         Self::with_store(store, cookie_cipher)
     }
 
+    /// Returns the persisted application appearance preference.
+    ///
+    /// # Errors
+    /// Returns an error when the profile state cannot be read.
+    pub fn appearance_preference(&self) -> Result<AppearancePreference> {
+        Ok(AppearancePreference::parse(
+            self.store.state("appearance")?.as_deref(),
+        ))
+    }
+
+    /// Persists the application appearance preference.
+    ///
+    /// # Errors
+    /// Returns an error when the profile state cannot be written.
+    pub fn set_appearance_preference(&self, preference: AppearancePreference) -> Result<()> {
+        self.store.set_state("appearance", preference.as_str())?;
+        Ok(())
+    }
+
     /// Opens an encrypted persistent profile with an injected key for process-level probes.
     ///
     /// Production callers should use [`Self::open`], which obtains the profile key from Keychain.
@@ -158,11 +204,24 @@ impl BrowserCore {
     fn with_store(store: Store, cookie_cipher: CookieCipher) -> Result<Self> {
         let cookie_jar = match store.cookie_state()? {
             Some(state) => {
-                let plaintext = cookie_cipher
+                let restored = cookie_cipher
                     .decrypt(&state)
-                    .context("could not decrypt profile Cookie state")?;
-                CookieJar::from_persistent_json(&plaintext)
-                    .context("could not restore profile Cookie state")?
+                    .context("could not decrypt profile Cookie state")
+                    .and_then(|plaintext| {
+                        CookieJar::from_persistent_json(&plaintext)
+                            .context("could not restore profile Cookie state")
+                    });
+                #[cfg(debug_assertions)]
+                {
+                    if let Ok(cookie_jar) = restored {
+                        cookie_jar
+                    } else {
+                        store.clear_cookie_state()?;
+                        CookieJar::new()
+                    }
+                }
+                #[cfg(not(debug_assertions))]
+                restored?
             }
             None => CookieJar::new(),
         };
@@ -213,6 +272,10 @@ impl BrowserCore {
     }
 
     fn persist_cookie_jar(&self) -> Result<()> {
+        if !self.cookie_jar.has_persistent_cookies() {
+            self.store.clear_cookie_state()?;
+            return Ok(());
+        }
         let plaintext = self
             .cookie_jar
             .persistent_json()
@@ -937,6 +1000,7 @@ fn render_document(
         display_list,
         diagnostics,
         image_resources: HashMap::new(),
+        favicon_png: None,
         forms,
         form_controls,
     }
@@ -1821,6 +1885,49 @@ mod tests {
             Some("profile=first".to_owned())
         );
         assert_eq!(second.cookie_header(request), None);
+    }
+
+    #[test]
+    fn appearance_preference_round_trips_through_profile_state() {
+        let core = BrowserCore::in_memory().unwrap();
+        assert_eq!(
+            core.appearance_preference().unwrap(),
+            AppearancePreference::System
+        );
+
+        core.set_appearance_preference(AppearancePreference::Dark)
+            .unwrap();
+
+        assert_eq!(
+            core.appearance_preference().unwrap(),
+            AppearancePreference::Dark
+        );
+    }
+
+    #[test]
+    fn session_cookies_do_not_create_persistent_cookie_state() {
+        let origin = Url::parse("https://example.com/").unwrap();
+        let mut core = BrowserCore::in_memory().unwrap();
+
+        core.store_response_cookie(&origin, "session=temporary; Secure")
+            .unwrap();
+
+        assert!(core.store.cookie_state().unwrap().is_none());
+    }
+
+    #[cfg(debug_assertions)]
+    #[test]
+    fn debug_profile_discards_cookie_state_encrypted_with_an_old_key() {
+        let store = Store::in_memory().unwrap();
+        let encrypted = profile_cookies::CookieCipher::from_key([1; 32])
+            .encrypt(b"not relevant")
+            .unwrap();
+        store.save_cookie_state(&encrypted).unwrap();
+
+        let core = BrowserCore::with_store(store, profile_cookies::CookieCipher::from_key([2; 32]))
+            .unwrap();
+
+        assert!(core.store.cookie_state().unwrap().is_none());
     }
 
     #[test]

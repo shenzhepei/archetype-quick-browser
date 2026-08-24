@@ -391,6 +391,15 @@ impl Store {
             .optional()?)
     }
 
+    /// Removes the encrypted persistent Cookie state.
+    ///
+    /// # Errors
+    /// Returns [`StoreError`] when `SQLite` cannot execute the delete.
+    pub fn clear_cookie_state(&self) -> Result<(), StoreError> {
+        self.connection.execute("DELETE FROM cookie_state", [])?;
+        Ok(())
+    }
+
     /// Stores versioned hibernation metadata for one page.
     ///
     /// # Errors
@@ -707,6 +716,9 @@ mod tests {
         };
         store.save_cookie_state(&replacement).unwrap();
         assert_eq!(store.cookie_state().unwrap(), Some(replacement));
+
+        store.clear_cookie_state().unwrap();
+        assert_eq!(store.cookie_state().unwrap(), None);
     }
 
     #[test]
