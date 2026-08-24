@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "release": "0.6.0",
+  "release": "0.7.0",
   "scope": "static_html_css",
   "statuses": ["supported", "partial", "unsupported"],
   "features": [
@@ -23,7 +23,10 @@
     {"id":"css.positioning.relative_absolute","status":"supported","evidence":["arch_style::tests::computes_flex_item_and_positioning_properties","arch_layout::tests::relative_and_absolute_positioning_preserve_normal_flow","arch_browser::snapshot::tests::fixture_snapshots_match_references"]},
     {"id":"css.positioning.fixed_sticky","status":"unsupported","evidence":[]},
     {"id":"css.z_index.basic","status":"supported","evidence":["arch_paint::tests::orders_boxes_by_z_index_then_document_order","arch_browser::snapshot::tests::fixture_snapshots_match_references"]},
-    {"id":"css.grid","status":"unsupported","evidence":[]},
+    {"id":"css.grid.basic_tracks","status":"supported","evidence":["arch_style::tests::computes_v7_grid_tracks_and_visual_properties","arch_layout::tests::grid_distributes_mixed_tracks_and_places_multiple_rows","arch_browser::snapshot::tests::fixture_snapshots_match_references"]},
+    {"id":"css.grid.advanced","status":"unsupported","evidence":[]},
+    {"id":"css.visual.radius_opacity_shadow","status":"supported","evidence":["arch_style::tests::computes_v7_grid_tracks_and_visual_properties","archetype_raster::tests::rounded_translucent_box_preserves_corner_and_blends_center","arch_browser::snapshot::tests::fixture_snapshots_match_references"]},
+    {"id":"css.text_decoration.basic","status":"supported","evidence":["arch_style::tests::computes_v7_grid_tracks_and_visual_properties","arch_browser::snapshot::tests::fixture_snapshots_match_references"]},
     {"id":"css.animation","status":"unsupported","evidence":[]}
   ]
 }

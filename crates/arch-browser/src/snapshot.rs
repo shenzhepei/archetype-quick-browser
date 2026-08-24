@@ -88,7 +88,7 @@ mod tests {
             .filter(|path| path.is_dir())
             .collect::<Vec<_>>();
         directories.sort();
-        assert_eq!(directories.len(), 62);
+        assert_eq!(directories.len(), 72);
 
         let loader = Loader::default();
         let mut renderer = SnapshotRenderer::default();

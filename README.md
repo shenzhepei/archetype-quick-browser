@@ -111,12 +111,16 @@ mkdir -p coverage
 cargo llvm-cov --workspace --lcov --output-path coverage/lcov.info
 ```
 
-The `V4 Acceptance` workflow now runs the current 62-page variant of the one-minute trend probe together with
+The `V4 Acceptance` workflow now runs the current 72-page variant of the one-minute trend probe together with
 the Runtime recovery, sandbox, entitlement, support-matrix, and workspace quality gates.
 
 The `V6 Acceptance` workflow extends the deterministic corpus to 62 pages and verifies responsive
 style selection at multiple viewport widths, positioning, the Runtime/SDK path, and the same
 one-minute CPU/RSS trend gate.
+
+The `V7 Acceptance` workflow extends the corpus to 72 pages and verifies bounded Grid tracks,
+row-major placement, rounded corners, opacity, single outer shadows, text decoration, and the
+same Runtime/SDK and one-minute resource gates.
 
 To run the V5 UI-neutral partner example:
 
@@ -159,6 +163,9 @@ The scoped product requirements and detailed implementation plans are in:
   its [detailed design](docs/detailed-design/07-Archetype-V6-静态响应式CSS详设.md), and
   [acceptance evidence](docs/v6-acceptance.md) with a
   [machine-readable resource report](docs/v6-acceptance-report.json)
+- [`docs/prd/08-Archetype-V7-Grid与视觉CSS-PRD.md`](docs/prd/08-Archetype-V7-Grid与视觉CSS-PRD.md),
+  its [detailed design](docs/detailed-design/08-Archetype-V7-Grid与视觉CSS详设.md), and
+  [acceptance evidence](docs/v7-acceptance.md)
 
 ## V3 Status
 
@@ -213,6 +220,18 @@ The scoped product requirements and detailed implementation plans are in:
   viewport width; Protocol v4.1 also carries viewport height for positioned initial containing blocks.
 - Grid, fixed/sticky positioning, general media queries, transitions, animation and GPU compositing
   remain unsupported and are reported separately in the machine-readable support matrix.
+
+## V7 Status
+
+- V7 is complete: bounded fixed, percentage, `fr`, and `repeat()` Grid columns with row-major
+  placement; independent row/column gaps; color `background` shorthand; rounded corners; element
+  opacity; one bounded outer shadow; and underline/line-through text decoration.
+- The deterministic corpus contains 72 pages, including 10 V7 fixtures. The original 62 reference
+  images remain byte-for-byte unchanged after regenerating the corpus.
+- The [one-minute V7 acceptance report](docs/v7-acceptance-report.json) completed 4,248 page loads;
+  second-half CPU cost per page was 99.47% of the first half and RSS grew by 384 KiB.
+- Advanced Grid placement, spans, `minmax()`, subgrid, multiple/inset shadows, gradients,
+  transitions, animation, JavaScript and GPU compositing remain unsupported.
 
 ## License
 

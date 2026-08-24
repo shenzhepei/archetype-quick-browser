@@ -194,7 +194,7 @@ fn parse_options() -> Result<Options> {
     let mut duration = Duration::from_secs(60);
     let mut cycle_delay = Duration::from_secs(1);
     let mut startup_samples = 20usize;
-    let mut expected_fixtures = 62usize;
+    let mut expected_fixtures = 72usize;
     let mut arguments = env::args().skip(1);
     while let Some(argument) = arguments.next() {
         match argument.as_str() {

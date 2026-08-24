@@ -107,11 +107,14 @@ mkdir -p coverage
 cargo llvm-cov --workspace --lcov --output-path coverage/lcov.info
 ```
 
-`V4 Acceptance` 工作流现在会运行当前 62 页版本的一分钟趋势探针，并同时执行 Runtime 恢复、沙箱、
+`V4 Acceptance` 工作流现在会运行当前 72 页版本的一分钟趋势探针，并同时执行 Runtime 恢复、沙箱、
 entitlement、支持矩阵和工作区质量闸门。
 
 `V6 Acceptance` 工作流将确定性语料扩展到 62 页，并验证多视口响应式样式、定位、
 Runtime/SDK 链路以及同一套一分钟 CPU/RSS 趋势闸门。
+
+`V7 Acceptance` 工作流将语料扩展到 72 页，并验证有界 Grid 轨道、行优先放置、圆角、透明度、
+单层外阴影、文本装饰，以及相同的 Runtime/SDK 和一分钟资源闸门。
 
 运行 V5 UI 框架无关的合作方示例：
 
@@ -153,6 +156,9 @@ cargo run -p archetype-sdk --example partner_render -- \
 - [`docs/prd/07-Archetype-V6-静态响应式CSS-PRD.md`](docs/prd/07-Archetype-V6-静态响应式CSS-PRD.md)、
   对应的[详细设计](docs/detailed-design/07-Archetype-V6-静态响应式CSS详设.md)和
   [验收证据](docs/v6-acceptance.md)，以及[机器可读资源报告](docs/v6-acceptance-report.json)
+- [`docs/prd/08-Archetype-V7-Grid与视觉CSS-PRD.md`](docs/prd/08-Archetype-V7-Grid与视觉CSS-PRD.md)、
+  对应的[详细设计](docs/detailed-design/08-Archetype-V7-Grid与视觉CSS详设.md)和
+  [验收证据](docs/v7-acceptance.md)
 
 ## V3 状态
 
@@ -197,6 +203,16 @@ cargo run -p archetype-sdk --example partner_render -- \
   还传递视口高度，用于定位元素的初始包含块。
 - Grid、fixed/sticky 定位、通用媒体查询、transition、animation 和 GPU 合成仍不支持，
   并在机器可读支持矩阵中单独标记。
+
+## V7 状态
+
+- V7 已完成：有界的固定、百分比、`fr` 和 `repeat()` Grid 列及行优先放置；独立行列间距；
+  颜色型 `background` 简写；圆角；元素透明度；单层有界外阴影；下划线和删除线文本装饰。
+- 确定性语料现有 72 页，其中新增 10 页 V7 金样。重新生成语料后，原 62 张参考图保持不变。
+- [V7 一分钟验收报告](docs/v7-acceptance-report.json)完成 4,248 次页面加载；后半段每页 CPU
+  成本为前半段的 99.47%，RSS 增长 384 KiB。
+- 高级 Grid 放置、span、`minmax()`、subgrid、多层/inset 阴影、渐变、transition、animation、
+  JavaScript 和 GPU 合成仍不支持。
 
 ## 许可证
 

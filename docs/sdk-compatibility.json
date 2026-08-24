@@ -5,7 +5,7 @@
   "sdk_compatibility": "0.1.x",
   "protocol_major": 4,
   "protocol_minor": 1,
-  "runtime_compatibility": "0.6.x",
+  "runtime_compatibility": "0.7.x",
   "targets": ["aarch64-apple-darwin"],
   "frame": {
     "format": "rgba8",
