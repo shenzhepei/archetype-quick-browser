@@ -169,11 +169,7 @@ fn ensure_limit(body: &[u8], limit: usize) -> Result<(), LoadError> {
 
 #[cfg(test)]
 mod tests {
-    use std::{
-        io::{Read as _, Write as _},
-        net::TcpListener,
-        thread,
-    };
+    use std::{io::Write as _, net::TcpListener, thread};
 
     use super::*;
 
