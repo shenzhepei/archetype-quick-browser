@@ -1,6 +1,6 @@
 # V3 Reference Snapshots
 
-This directory contains the 30 fixed `1280x800 @1x` PNG references required by the V3 corpus.
+This directory contains the 62 fixed `1280x800 @1x` PNG references used by the V3-V6 corpus.
 Tests render each fixture through the production document pipeline and a deterministic DisplayList
 rasterizer, then fail when more than 0.5% of pixels differ from its reference.
 

@@ -205,5 +205,53 @@
     "title": "Flex fixture 50",
     "text": "Overflow image",
     "loaded_image_ends_with": "05-image/sample.png"
+  },
+  "51-custom-property-inheritance": {
+    "title": "V6 custom property inheritance",
+    "text": "Inherited design tokens"
+  },
+  "52-custom-property-fallback": {
+    "title": "V6 custom property fallback",
+    "text": "Variable fallback remains readable"
+  },
+  "53-media-min-width": {
+    "title": "V6 minimum width media",
+    "text": "Wide viewport branch"
+  },
+  "54-media-max-width": {
+    "title": "V6 maximum width media",
+    "text": "Desktop rule remains selected"
+  },
+  "55-media-width-range": {
+    "title": "V6 media width range",
+    "text": "Bounded responsive range"
+  },
+  "56-flex-order": {
+    "title": "V6 flex order",
+    "text": "Visual first"
+  },
+  "57-flex-basis": {
+    "title": "V6 flex basis",
+    "text": "Quarter basis"
+  },
+  "58-flex-column-order": {
+    "title": "V6 column order",
+    "text": "First row"
+  },
+  "59-position-relative": {
+    "title": "V6 relative positioning",
+    "text": "Shifted visual row"
+  },
+  "60-position-absolute-start": {
+    "title": "V6 absolute start offsets",
+    "text": "Absolute badge"
+  },
+  "61-position-absolute-end": {
+    "title": "V6 absolute end offsets",
+    "text": "Right bottom status"
+  },
+  "62-z-index": {
+    "title": "V6 stable z index",
+    "text": "Front layer"
   }
 }
