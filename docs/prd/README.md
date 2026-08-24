@@ -13,6 +13,8 @@
 | 02 | [扩展系统 PRD](./02-Archetype-扩展系统-PRD.md) | [扩展系统详设](../detailed-design/02-Archetype-扩展系统详设.md) |
 | 03 | [Archetype V3 PRD](./03-Archetype-V3-PRD.md) | [Archetype V3 详设](../detailed-design/03-Archetype-V3-详设.md) |
 | 04 | [Rust SDK 与 Runtime PRD](./04-Archetype-Rust-SDK与Runtime-PRD.md) | [Rust SDK 与 Runtime 详设](../detailed-design/04-Archetype-Rust-SDK与Runtime详设.md) |
+| 05 | [Archetype V4 安全运行时 PRD](./05-Archetype-V4-安全运行时-PRD.md) | [Archetype V4 安全运行时详设](../detailed-design/05-Archetype-V4-安全运行时详设.md) |
 
 03 的当前桌面实现技术基线为 GPUI + gpui-component，采用标题栏内顶部标签页、紧凑 Space 切换和 Space 书签栏，具体工程约束以同号详设为准。
 04 定义面向 Rust 合作方的公开 SDK、独立 Runtime 和版本化 IPC 长期交付边界。
+05 定义参考浏览器 V4 的实施范围，从稳定类型提取开始，依次交付版本化 IPC、Renderer 隔离、macOS 沙箱、基础会话和 Flexbox。

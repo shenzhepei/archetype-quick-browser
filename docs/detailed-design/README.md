@@ -8,5 +8,6 @@
 | 02 | [Archetype 扩展系统详设](./02-Archetype-扩展系统详设.md) | [02 扩展系统 PRD](../prd/02-Archetype-扩展系统-PRD.md) | 零信任扩展 ZTE |
 | 03 | [Archetype V3 详设](./03-Archetype-V3-详设.md) | [03 Archetype V3 PRD](../prd/03-Archetype-V3-PRD.md) | 标题栏标签页、紧凑 Space、书签栏与第一个可实施版本的验收基线 |
 | 04 | [Archetype Rust SDK 与 Runtime 详设](./04-Archetype-Rust-SDK与Runtime详设.md) | [04 Rust SDK 与 Runtime PRD](../prd/04-Archetype-Rust-SDK与Runtime-PRD.md) | Rust-only SDK、版本化 IPC、独立 Runtime、安全与交付边界 |
+| 05 | [Archetype V4 安全运行时详设](./05-Archetype-V4-安全运行时详设.md) | [05 Archetype V4 安全运行时 PRD](../prd/05-Archetype-V4-安全运行时-PRD.md) | 稳定类型、内部 IPC、Renderer 隔离、macOS 沙箱、基础会话与 Flexbox |
 
 产品「做什么/不做什么」见 [`../prd/`](../prd/)。
