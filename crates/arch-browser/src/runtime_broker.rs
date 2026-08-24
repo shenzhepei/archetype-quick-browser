@@ -3,6 +3,7 @@ use std::{collections::BTreeSet, str};
 use arch_dom::NodeKind;
 use arch_net::{LoadError, Loader};
 use arch_session::cookies::CookieJar;
+use arch_session::forms::FormSubmission;
 use archetype_protocol::{BrokeredResource, Codec, ResourceBytes, ResourceKind};
 use archetype_types::{ArchetypeUrl, NavigationId, PageId};
 use thiserror::Error;
@@ -67,6 +68,40 @@ pub fn load_static_document_with_cookies(
     let mut load = |url: &Url, limit: usize, document: bool| {
         let response =
             loader.load_with_cookies(url, limit, cookie_jar, &current_top_level, document)?;
+        if document {
+            current_top_level.clone_from(&response.final_url);
+        }
+        Ok(response)
+    };
+    load_static_document_with(request, &mut load)
+}
+
+/// Loads a form POST response and its resources through the Browser-owned Cookie policy.
+///
+/// # Errors
+/// Returns a typed broker error under the same limits as [`load_static_document`].
+pub fn load_form_submission_with_cookies(
+    loader: &Loader,
+    request: &BrokerRequest,
+    submission: &FormSubmission,
+    cookie_jar: &mut CookieJar,
+    top_level_url: &Url,
+) -> Result<StaticDocument, BrokerError> {
+    let mut document_pending = true;
+    let mut current_top_level = top_level_url.clone();
+    let mut load = |url: &Url, limit: usize, document: bool| {
+        let response = if document && document_pending {
+            document_pending = false;
+            loader.submit_with_cookies(
+                url,
+                limit,
+                cookie_jar,
+                &current_top_level,
+                &submission.encoded,
+            )?
+        } else {
+            loader.load_with_cookies(url, limit, cookie_jar, &current_top_level, document)?
+        };
         if document {
             current_top_level.clone_from(&response.final_url);
         }
@@ -246,7 +281,15 @@ const fn resource_name(kind: ResourceKind) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use std::{fs, path::Path};
+    use std::{
+        fs,
+        io::{Read, Write},
+        net::TcpListener,
+        path::Path,
+        thread,
+    };
+
+    use arch_session::forms::FormMethod;
 
     use super::*;
 
@@ -328,5 +371,62 @@ mod tests {
                 .any(|diagnostic| diagnostic.contains("cross-origin image"))
         );
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn brokers_form_post_response_and_cookie_aware_resources() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = thread::spawn(move || {
+            let (mut post_stream, _) = listener.accept().unwrap();
+            let mut request_buffer = [0_u8; 4096];
+            let length = post_stream.read(&mut request_buffer).unwrap();
+            let post_request = String::from_utf8_lossy(&request_buffer[..length]);
+            assert!(post_request.starts_with("POST /submit "));
+            assert!(post_request.ends_with("query=runtime"));
+            let body = "<title>Posted</title><img src='/result.png'>";
+            write!(
+                post_stream,
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nSet-Cookie: result=ready; Path=/\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            )
+            .unwrap();
+
+            let (mut resource_stream, _) = listener.accept().unwrap();
+            let length = resource_stream.read(&mut request_buffer).unwrap();
+            let resource_request =
+                String::from_utf8_lossy(&request_buffer[..length]).to_ascii_lowercase();
+            assert!(resource_request.starts_with("get /result.png "));
+            assert!(resource_request.contains("cookie: result=ready"));
+            resource_stream
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 3\r\nConnection: close\r\n\r\npng")
+                .unwrap();
+        });
+        let target = Url::parse(&format!("http://{address}/submit")).unwrap();
+        let request = BrokerRequest {
+            page_id: PageId::new(),
+            navigation_id: NavigationId::zero().saturating_next(),
+            url: target.clone(),
+            viewport_width_px: 960,
+        };
+        let submission = FormSubmission {
+            method: FormMethod::Post,
+            target: target.clone(),
+            encoded: "query=runtime".to_owned(),
+        };
+
+        let document = load_form_submission_with_cookies(
+            &Loader::default(),
+            &request,
+            &submission,
+            &mut CookieJar::new(),
+            &target,
+        )
+        .unwrap();
+
+        server.join().unwrap();
+        assert_eq!(document.url.as_str(), target.as_str());
+        assert!(document.html.contains("Posted"));
+        assert_eq!(document.resources.len(), 1);
     }
 }

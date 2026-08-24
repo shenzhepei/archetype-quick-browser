@@ -9,14 +9,16 @@ use std::{
 
 use arch_browser::{
     BrowserCore, PendingNavigation, RenderError, RenderErrorKind, RenderedPage,
-    runtime_broker::{BrokerRequest, load_static_document_with_cookies},
+    runtime_broker::{
+        BrokerRequest, load_form_submission_with_cookies, load_static_document_with_cookies,
+    },
     runtime_supervisor::RuntimeSupervisor,
 };
 use arch_net::{LoadError, LoadErrorKind, Loader};
 use arch_paint::{DisplayCommand, PaintColor};
 use arch_session::Viewport;
 use arch_session::cookies::CookieJar;
-use arch_session::forms::{ControlId, ControlKind};
+use arch_session::forms::{ControlId, ControlKind, FormMethod, FormSubmission};
 use arch_store::{Bookmark, BookmarkKind, Page, Space};
 use arch_style::{FontStyle as PageFontStyle, FontWeight as PageFontWeight, TextAlign};
 use gpui::{
@@ -730,6 +732,17 @@ impl QuickBrowser {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.start_render_request(page, pending, None, window, cx);
+    }
+
+    fn start_render_request(
+        &mut self,
+        page: Page,
+        pending: PendingNavigation,
+        submission: Option<FormSubmission>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let page_id = page.id.clone();
         let url = pending.url().clone();
         logging::navigation_started(&page_id, url.as_str());
@@ -746,17 +759,28 @@ impl QuickBrowser {
                     let loader = Loader::new()?;
                     if let Some(runtime) = runtime {
                         let mut cookie_jar = cookie_jar;
-                        let document = load_static_document_with_cookies(
-                            &loader,
-                            &BrokerRequest {
-                                page_id: runtime_page_id,
-                                navigation_id,
-                                url: url.clone(),
-                                viewport_width_px: 960,
-                            },
-                            &mut cookie_jar,
-                            &top_level_url,
-                        )?;
+                        let request = BrokerRequest {
+                            page_id: runtime_page_id,
+                            navigation_id,
+                            url: url.clone(),
+                            viewport_width_px: 960,
+                        };
+                        let document = if let Some(submission) = submission.as_ref() {
+                            load_form_submission_with_cookies(
+                                &loader,
+                                &request,
+                                submission,
+                                &mut cookie_jar,
+                                &top_level_url,
+                            )?
+                        } else {
+                            load_static_document_with_cookies(
+                                &loader,
+                                &request,
+                                &mut cookie_jar,
+                                &top_level_url,
+                            )?
+                        };
                         let metadata = arch_browser::render_html(
                             &Url::parse(document.url.as_str())?,
                             &document.html,
@@ -988,8 +1012,11 @@ impl QuickBrowser {
         let Some(submission) = submission else {
             return;
         };
-        match self.core.submit_form(&page, &submission, 960.0) {
-            Ok(rendered) => self.apply_rendered(&page, rendered, window, cx),
+        match self.core.start_navigation(&page, &submission.target) {
+            Ok(pending) => {
+                let submission = (submission.method == FormMethod::Post).then_some(submission);
+                self.start_render_request(page, pending, submission, window, cx);
+            }
             Err(error) => {
                 logging::navigation_failed(
                     &page.id,
