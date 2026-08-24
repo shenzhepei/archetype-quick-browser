@@ -177,7 +177,7 @@ impl RequestRouter {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct RoutedResponse {
     pub original_request_id: u64,
     pub response_request_id: u64,

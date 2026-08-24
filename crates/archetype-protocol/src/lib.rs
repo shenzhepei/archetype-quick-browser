@@ -3,6 +3,7 @@ use std::{
     io::{Read, Write},
 };
 
+use arch_paint::DisplayList;
 use archetype_types::{ArchetypeUrl, NavigationId, PageId};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -111,20 +112,40 @@ pub enum Request {
         navigation_id: NavigationId,
         url: ArchetypeUrl,
     },
+    RenderDocument {
+        page_id: PageId,
+        navigation_id: NavigationId,
+        url: ArchetypeUrl,
+        html: String,
+        viewport_width_px: u32,
+    },
     Cancel {
         target_request_id: u64,
     },
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Response {
     Accepted,
-    Cancelled { target_request_id: u64 },
-    Failed { code: String, message: String },
+    Rendered {
+        page_id: PageId,
+        navigation_id: NavigationId,
+        final_url: ArchetypeUrl,
+        title: String,
+        display_list: DisplayList,
+        diagnostics: Vec<String>,
+    },
+    Cancelled {
+        target_request_id: u64,
+    },
+    Failed {
+        code: String,
+        message: String,
+    },
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Message {
     ClientHello(ClientHello),
     ServerHello(ServerHello),
@@ -166,7 +187,7 @@ impl Message {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Envelope {
     protocol_major: u16,
     protocol_minor: u16,

@@ -11,7 +11,9 @@ struct FakeRuntime;
 impl FakeRuntime {
     fn response(request: &Envelope) -> Envelope {
         let response = match request.message() {
-            Message::Request(Request::Navigate { .. }) => Response::Accepted,
+            Message::Request(Request::Navigate { .. } | Request::RenderDocument { .. }) => {
+                Response::Accepted
+            }
             Message::Request(Request::Cancel { target_request_id }) => Response::Cancelled {
                 target_request_id: *target_request_id,
             },
