@@ -124,5 +124,86 @@
     "title": "Relative navigation fixture",
     "text": "Relative navigation source",
     "link_ends_with": "30-relative-navigation/destination.html"
+  },
+  "31-flex-row": {
+    "title": "Flex fixture 31",
+    "text": "Row"
+  },
+  "32-flex-row-reverse": {
+    "title": "Flex fixture 32",
+    "text": "Row reverse"
+  },
+  "33-flex-column": {
+    "title": "Flex fixture 33",
+    "text": "Column"
+  },
+  "34-flex-column-reverse": {
+    "title": "Flex fixture 34",
+    "text": "Column reverse"
+  },
+  "35-flex-wrap": {
+    "title": "Flex fixture 35",
+    "text": "Wrap"
+  },
+  "36-flex-nowrap-shrink": {
+    "title": "Flex fixture 36",
+    "text": "No wrap shrink"
+  },
+  "37-flex-gap": {
+    "title": "Flex fixture 37",
+    "text": "Gap"
+  },
+  "38-flex-axis-gap": {
+    "title": "Flex fixture 38",
+    "text": "Axis gaps"
+  },
+  "39-flex-justify-center": {
+    "title": "Flex fixture 39",
+    "text": "Justify center"
+  },
+  "40-flex-justify-end": {
+    "title": "Flex fixture 40",
+    "text": "Justify end"
+  },
+  "41-flex-space-between": {
+    "title": "Flex fixture 41",
+    "text": "Space between"
+  },
+  "42-flex-space-around": {
+    "title": "Flex fixture 42",
+    "text": "Space around"
+  },
+  "43-flex-space-evenly": {
+    "title": "Flex fixture 43",
+    "text": "Space evenly"
+  },
+  "44-flex-align-start": {
+    "title": "Flex fixture 44",
+    "text": "Align start"
+  },
+  "45-flex-align-center": {
+    "title": "Flex fixture 45",
+    "text": "Align center"
+  },
+  "46-flex-align-end": {
+    "title": "Flex fixture 46",
+    "text": "Align end"
+  },
+  "47-flex-stretch": {
+    "title": "Flex fixture 47",
+    "text": "Stretch"
+  },
+  "48-flex-grow-chinese": {
+    "title": "Flex fixture 48",
+    "text": "弹性增长"
+  },
+  "49-flex-nested": {
+    "title": "Flex fixture 49",
+    "text": "Nested"
+  },
+  "50-flex-overflow-image": {
+    "title": "Flex fixture 50",
+    "text": "Overflow image",
+    "loaded_image_ends_with": "05-image/sample.png"
   }
 }

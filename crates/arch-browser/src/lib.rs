@@ -1230,8 +1230,8 @@ mod tests {
                 .unwrap();
         assert_eq!(
             expectations.len(),
-            30,
-            "fixture manifest must contain 30 pages"
+            50,
+            "fixture manifest must contain 50 pages"
         );
 
         let mut fixture_directories = fs::read_dir(&pages)
@@ -1242,8 +1242,8 @@ mod tests {
         fixture_directories.sort();
         assert_eq!(
             fixture_directories.len(),
-            30,
-            "fixture corpus must contain 30 directories"
+            50,
+            "fixture corpus must contain 50 directories"
         );
 
         let mut documents = Vec::new();
