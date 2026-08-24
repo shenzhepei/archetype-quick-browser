@@ -102,6 +102,46 @@ fn one_hundred_sdk_runtime_restarts_remain_renderable() {
 }
 
 #[test]
+fn sdk_discards_an_older_concurrent_navigation() {
+    let engine = engine();
+    let page = block_on(engine.create_page(PageOptions::new(320, 180))).unwrap();
+    let slow = StaticDocument::new(
+        "https://example.test/slow",
+        format!("<title>Old</title><p>{}</p>", "old ".repeat(250_000)),
+    )
+    .unwrap();
+    let current = StaticDocument::new(
+        "https://example.test/current",
+        "<title>Current</title><p>newest navigation</p>",
+    )
+    .unwrap();
+
+    let older = page.render(slow);
+    let newest = page.render(current);
+
+    assert!(matches!(block_on(older), Err(SdkError::StaleNavigation)));
+    assert_eq!(block_on(newest).unwrap().title(), "Current");
+    block_on(engine.shutdown()).unwrap();
+}
+
+#[test]
+fn stopped_engine_reports_disconnect_to_its_page() {
+    let engine = engine();
+    let page = block_on(engine.create_page(PageOptions::new(320, 180))).unwrap();
+    block_on(engine.shutdown()).unwrap();
+    let document = StaticDocument::new("https://example.test/stopped", "<p>stopped</p>").unwrap();
+
+    assert!(matches!(
+        block_on(page.render(document)),
+        Err(SdkError::Disconnected)
+    ));
+    assert!(matches!(
+        block_on(page.next_event()).unwrap(),
+        PageEvent::RuntimeDisconnected
+    ));
+}
+
+#[test]
 fn public_sdk_source_does_not_name_internal_ui_or_render_types() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../archetype-sdk/src");
     for file in ["lib.rs", "api.rs", "future.rs"] {

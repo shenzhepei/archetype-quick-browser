@@ -316,6 +316,7 @@ impl Page {
     #[must_use]
     pub fn render(&self, document: StaticDocument) -> SdkFuture<Result<Navigation, SdkError>> {
         if self.engine.stopped.load(Ordering::Acquire) {
+            self.events.push(PageEvent::RuntimeDisconnected);
             return SdkFuture::ready(Err(SdkError::Disconnected));
         }
         let navigation_id = match self.navigation_id.lock() {
@@ -517,13 +518,9 @@ impl EventQueue {
 fn build_engine(builder: EngineBuilder) -> Result<Engine, SdkError> {
     let runtime_path = match builder.runtime_path {
         Some(path) => path,
-        None => std::env::current_exe()
-            .map_err(|error| SdkError::Io(error.to_string()))?
-            .parent()
-            .map(|parent| parent.join("archetype-runtime"))
-            .ok_or_else(|| {
-                SdkError::Configuration("SDK executable has no parent directory".to_owned())
-            })?,
+        None => sibling_runtime(
+            &std::env::current_exe().map_err(|error| SdkError::Io(error.to_string()))?,
+        )?,
     };
     validate_runtime(&runtime_path, builder.expected_sha256)?;
     let (runtime, ready) = RuntimeSupervisor::spawn(&runtime_path).map_err(map_runtime_error)?;
@@ -576,6 +573,14 @@ fn validate_runtime(path: &Path, expected_sha256: Option<[u8; 32]>) -> Result<()
         }
     }
     Ok(())
+}
+
+fn sibling_runtime(current_executable: &Path) -> Result<PathBuf, SdkError> {
+    current_executable
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .map(|parent| parent.join("archetype-runtime"))
+        .ok_or_else(|| SdkError::Configuration("SDK executable has no parent directory".to_owned()))
 }
 
 fn render_page(
@@ -708,6 +713,14 @@ mod tests {
         )
         .unwrap();
         assert!(document.add_resource(cross_origin).is_err());
+        assert!(
+            Resource::new(
+                "https://example.test/large.png",
+                ResourceKind::Image,
+                vec![0; RESOURCE_BYTE_LIMIT + 1]
+            )
+            .is_err()
+        );
     }
 
     #[test]
@@ -736,5 +749,17 @@ mod tests {
                 .iter()
                 .any(|event| matches!(event, PageEvent::RuntimeDisconnected))
         );
+    }
+
+    #[test]
+    fn discovers_only_a_same_directory_runtime() {
+        assert_eq!(
+            sibling_runtime(Path::new(
+                "/Applications/Partner.app/Contents/MacOS/partner"
+            ))
+            .unwrap(),
+            Path::new("/Applications/Partner.app/Contents/MacOS/archetype-runtime")
+        );
+        assert!(sibling_runtime(Path::new("partner")).is_err());
     }
 }
