@@ -71,12 +71,13 @@ cargo run -p arch-browser --example update_snapshots
 ```
 
 重启恢复集成测试会强制终止独立的浏览器配置进程，再验证空间、分层书签、标签页、标题、顺序和
-选中项均可恢复。CI 会对 HTML 和 CSS 解析器执行模糊测试。如需在本地复现，请安装 Rust nightly
+选中项均可恢复。CI 会对 HTML、CSS 和版本化协议执行模糊测试。如需在本地复现，请安装 Rust nightly
 和 [`cargo-fuzz`](https://github.com/rust-fuzz/cargo-fuzz)，然后运行：
 
 ```bash
 cargo +nightly fuzz run html -- -max_total_time=20 -timeout=5
 cargo +nightly fuzz run css -- -max_total_time=20 -timeout=5
+cargo +nightly fuzz run protocol -- -max_total_time=20 -timeout=5
 ```
 
 如需复现 V3 的启动、性能、内存和一分钟资源趋势证据，请构建全部 release 二进制并运行：
@@ -104,6 +105,7 @@ cargo llvm-cov --workspace --lcov --output-path coverage/lcov.info
 
 | Crate | 职责 |
 | --- | --- |
+| `archetype-types`、`archetype-protocol` | 稳定值对象、分帧 IPC、协商、路由和有界 transport |
 | `arch-browser` | 桌面外壳、编排、本地化和渲染集成 |
 | `arch-html`、`arch-dom` | HTML 解析和文档表示 |
 | `arch-css`、`arch-style` | CSS 解析、层叠和计算样式 |
@@ -115,6 +117,8 @@ cargo llvm-cov --workspace --lcov --output-path coverage/lcov.info
 
 - [`docs/prd/03-Archetype-V3-PRD.md`](docs/prd/03-Archetype-V3-PRD.md)
 - [`docs/detailed-design/03-Archetype-V3-详设.md`](docs/detailed-design/03-Archetype-V3-详设.md)
+- [`docs/prd/05-Archetype-V4-安全运行时-PRD.md`](docs/prd/05-Archetype-V4-安全运行时-PRD.md)
+- [`docs/detailed-design/05-Archetype-V4-安全运行时详设.md`](docs/detailed-design/05-Archetype-V4-安全运行时详设.md)
 - [`docs/v3-acceptance.md`](docs/v3-acceptance.md) 及其
   [机器可读报告](docs/v3-acceptance-report.json)
 
@@ -132,6 +136,13 @@ cargo llvm-cov --workspace --lcov --output-path coverage/lcov.info
   渲染状态，以及已记录的启动、页面流水线、帧、CPU 和 RSS 趋势证据也已完成。
 - 每项验收要求的证据和已知限制维护在 [`docs/v3-acceptance.md`](docs/v3-acceptance.md)。
   JavaScript、表单、媒体、Flexbox、Grid、多进程渲染、沙箱和公开签名分发仍不属于 V3 范围。
+
+## V4 开发进度
+
+- 稳定类型与协议原型切片已经完成：UUID V7 页面 ID、单调导航 ID、经过验证的 URL 值对象、
+  版本化长度前缀 JSON codec、能力协商、有界内存 transport、请求路由、取消、超时、背压和协议模糊测试。
+- 下一实施切片是独立 Renderer Runtime 进程。只有进程隔离、macOS 沙箱、资源 broker、会话能力、
+  Flexbox、休眠和发布验收全部满足配对规范后，V4 才算完成。
 
 ## 许可证
 

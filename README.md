@@ -74,13 +74,14 @@ cargo run -p arch-browser --example update_snapshots
 ```
 
 The restart-recovery integration test force-terminates a separate browser-profile process before
-checking that Spaces, nested bookmarks, tabs, titles, order, and selection survive. HTML and CSS
-parser fuzzing runs in CI. To reproduce either fuzz target locally, install nightly Rust and
+checking that Spaces, nested bookmarks, tabs, titles, order, and selection survive. HTML, CSS, and
+versioned protocol fuzzing runs in CI. To reproduce the fuzz targets locally, install nightly Rust and
 [`cargo-fuzz`](https://github.com/rust-fuzz/cargo-fuzz), then run:
 
 ```bash
 cargo +nightly fuzz run html -- -max_total_time=20 -timeout=5
 cargo +nightly fuzz run css -- -max_total_time=20 -timeout=5
+cargo +nightly fuzz run protocol -- -max_total_time=20 -timeout=5
 ```
 
 To reproduce the V3 startup, performance, memory, and one-minute resource-trend evidence, build
@@ -109,6 +110,7 @@ The workspace separates browser concerns into focused crates:
 
 | Crate | Responsibility |
 | --- | --- |
+| `archetype-types`, `archetype-protocol` | Stable values, framed IPC, negotiation, routing, and bounded transports |
 | `arch-browser` | Desktop shell, orchestration, localization, and rendering integration |
 | `arch-html`, `arch-dom` | HTML parsing and document representation |
 | `arch-css`, `arch-style` | CSS parsing, cascade, and computed style |
@@ -120,6 +122,8 @@ The scoped product requirements and detailed implementation plans are in:
 
 - [`docs/prd/03-Archetype-V3-PRD.md`](docs/prd/03-Archetype-V3-PRD.md)
 - [`docs/detailed-design/03-Archetype-V3-详设.md`](docs/detailed-design/03-Archetype-V3-详设.md)
+- [`docs/prd/05-Archetype-V4-安全运行时-PRD.md`](docs/prd/05-Archetype-V4-安全运行时-PRD.md)
+- [`docs/detailed-design/05-Archetype-V4-安全运行时详设.md`](docs/detailed-design/05-Archetype-V4-安全运行时详设.md)
 - [`docs/v3-acceptance.md`](docs/v3-acceptance.md) and its
   [machine-readable report](docs/v3-acceptance-report.json)
 
@@ -141,6 +145,16 @@ The scoped product requirements and detailed implementation plans are in:
 - Known limits and the evidence for every acceptance requirement are maintained in
   [`docs/v3-acceptance.md`](docs/v3-acceptance.md). JavaScript, forms, media, Flexbox, Grid,
   multi-process rendering, sandboxing, and public signed distribution remain outside V3 scope.
+
+## V4 Development
+
+- The stable type and protocol prototype slices are complete: UUID V7 page IDs, monotonic
+  navigation IDs, validated URL values, a versioned length-prefixed JSON codec, capability
+  negotiation, bounded in-memory transport, request routing, cancellation, timeout handling,
+  backpressure, and protocol fuzzing.
+- The next implementation slice is the independent Renderer Runtime process. V4 is not complete
+  until process isolation, the macOS sandbox, brokered resources, session features, Flexbox,
+  hibernation, and release acceptance all pass the paired specification.
 
 ## License
 
