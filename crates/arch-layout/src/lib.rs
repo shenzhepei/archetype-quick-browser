@@ -75,7 +75,7 @@ pub fn layout<S: BuildHasher>(
         tree: LayoutTree::default(),
     };
     let mut cursor_y = 0.0;
-    context.layout_node(document.root(), 0.0, viewport_width, &mut cursor_y);
+    context.layout_node(document.root(), 0.0, viewport_width, None, &mut cursor_y);
     context.tree.content_height = cursor_y;
     context.tree
 }
@@ -95,6 +95,7 @@ impl<S: BuildHasher> LayoutContext<'_, S> {
         node_id: NodeId,
         containing_x: f32,
         containing_width: f32,
+        containing_height: Option<f32>,
         cursor_y: &mut f32,
     ) {
         let Some(node) = self.document.node(node_id) else {
@@ -122,35 +123,12 @@ impl<S: BuildHasher> LayoutContext<'_, S> {
         let image = self.images.get(&node.id).cloned();
         let creates_box = style.display == Display::Block || text.is_some() || image.is_some();
         if creates_box {
-            let available_width =
-                (containing_width - style.margin.left - style.margin.right).max(0.0);
             let horizontal_edges = style.padding.left + style.padding.right + style.border_px * 2.0;
             let vertical_edges = style.padding.top + style.padding.bottom + style.border_px * 2.0;
-            let mut width = style
-                .width
-                .map_or(available_width, |value| resolve(value, containing_width));
-            if style.box_sizing == BoxSizing::ContentBox && style.width.is_some() {
-                width += horizontal_edges;
-            }
-            if let Some(min_width) = style.min_width {
-                width = width.max(box_dimension(style, resolve(min_width, containing_width)));
-            }
-            if let Some(max_width) = style.max_width {
-                width = width.min(box_dimension(style, resolve(max_width, containing_width)));
-            }
-            width = width.min(available_width).max(0.0);
+            let width = resolve_box_width(style, containing_width);
             let content_width = (width - horizontal_edges).max(0.0);
-            let line_height = style.line_height_px.max(1.0);
-            let own_content_height = if let Some(image) = &image {
-                let intrinsic_width = pixel_dimension(image.intrinsic_width.max(1));
-                let scale = (content_width / intrinsic_width).min(1.0);
-                pixel_dimension(image.intrinsic_height) * scale
-            } else if let Some(value) = &text {
-                let chars_per_line = (content_width / (style.font_size_px * 0.55)).max(1.0);
-                text_line_count(value, chars_per_line, style.white_space) * line_height
-            } else {
-                0.0
-            };
+            let own_content_height =
+                intrinsic_content_height(style, image.as_ref(), text.as_deref(), content_width);
             let x = containing_x + style.margin.left;
             let y = *cursor_y + style.margin.top;
             let box_index = self.tree.boxes.len();
@@ -182,18 +160,34 @@ impl<S: BuildHasher> LayoutContext<'_, S> {
             let content_x = x + style.padding.left + style.border_px;
             let content_y = y + style.padding.top + style.border_px;
             let mut child_cursor = content_y + own_content_height;
-            self.layout_children(&node.children, content_x, content_width, &mut child_cursor);
+            let specified_height = style
+                .height
+                .and_then(|value| resolve_height(value, containing_height))
+                .map(|value| box_height(style, value));
+            let child_containing_height =
+                specified_height.map(|height| (height - vertical_edges).max(0.0));
+            self.layout_children(
+                &node.children,
+                content_x,
+                content_width,
+                child_containing_height,
+                &mut child_cursor,
+            );
             let descendants_height = child_cursor - content_y;
             let natural_height = descendants_height.max(own_content_height) + vertical_edges;
-            let height = style.height.map_or(natural_height, |value| {
-                box_dimension(style, resolve(value, containing_width))
-            });
+            let height = specified_height.unwrap_or(natural_height);
             self.tree.boxes[box_index].bounds.height = height;
             self.clip_descendants(box_index, style.overflow, style.border_px);
             *cursor_y = y + height + style.margin.bottom;
         } else {
             for child in &node.children {
-                self.layout_node(*child, containing_x, containing_width, cursor_y);
+                self.layout_node(
+                    *child,
+                    containing_x,
+                    containing_width,
+                    containing_height,
+                    cursor_y,
+                );
             }
         }
     }
@@ -217,6 +211,7 @@ impl<S: BuildHasher> LayoutContext<'_, S> {
         children: &[NodeId],
         content_x: f32,
         content_width: f32,
+        content_height: Option<f32>,
         cursor_y: &mut f32,
     ) {
         let mut inline_x = 0.0_f32;
@@ -235,7 +230,13 @@ impl<S: BuildHasher> LayoutContext<'_, S> {
                     inline_x = 0.0;
                     line_height = 0.0;
                 }
-                self.layout_node(*child_id, content_x, content_width, cursor_y);
+                self.layout_node(
+                    *child_id,
+                    content_x,
+                    content_width,
+                    content_height,
+                    cursor_y,
+                );
                 continue;
             }
             self.layout_inline_subtree(
@@ -413,6 +414,56 @@ fn box_dimension(style: &arch_style::ComputedStyle, value: f32) -> f32 {
     }
 }
 
+fn resolve_box_width(style: &arch_style::ComputedStyle, containing_width: f32) -> f32 {
+    let available_width = (containing_width - style.margin.left - style.margin.right).max(0.0);
+    let mut width = style
+        .width
+        .map_or(available_width, |value| resolve(value, containing_width));
+    if style.box_sizing == BoxSizing::ContentBox && style.width.is_some() {
+        width = box_dimension(style, width);
+    }
+    if let Some(min_width) = style.min_width {
+        width = width.max(box_dimension(style, resolve(min_width, containing_width)));
+    }
+    if let Some(max_width) = style.max_width {
+        width = width.min(box_dimension(style, resolve(max_width, containing_width)));
+    }
+    width.min(available_width).max(0.0)
+}
+
+fn intrinsic_content_height(
+    style: &arch_style::ComputedStyle,
+    image: Option<&ImageBox>,
+    text: Option<&str>,
+    content_width: f32,
+) -> f32 {
+    if let Some(image) = image {
+        let intrinsic_width = pixel_dimension(image.intrinsic_width.max(1));
+        let scale = (content_width / intrinsic_width).min(1.0);
+        pixel_dimension(image.intrinsic_height) * scale
+    } else if let Some(text) = text {
+        let chars_per_line = (content_width / (style.font_size_px * 0.55)).max(1.0);
+        text_line_count(text, chars_per_line, style.white_space) * style.line_height_px.max(1.0)
+    } else {
+        0.0
+    }
+}
+
+fn box_height(style: &arch_style::ComputedStyle, value: f32) -> f32 {
+    if style.box_sizing == BoxSizing::ContentBox {
+        value + style.padding.top + style.padding.bottom + style.border_px * 2.0
+    } else {
+        value
+    }
+}
+
+fn resolve_height(length: ComputedLength, containing: Option<f32>) -> Option<f32> {
+    match length {
+        ComputedLength::Px(value) => Some(value.max(0.0)),
+        ComputedLength::Percent(value) => containing.map(|height| (height * value).max(0.0)),
+    }
+}
+
 #[allow(clippy::cast_precision_loss)]
 fn pixel_dimension(value: u32) -> f32 {
     value as f32
@@ -520,6 +571,51 @@ mod tests {
             .unwrap();
         assert!((item.bounds.width - 320.0).abs() < f32::EPSILON);
         assert!((item.bounds.height - 80.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn resolves_percentage_height_against_definite_parent_content_height() {
+        let document = parse_html("<section id='parent'><div id='child'></div></section>");
+        let styled = style_document(
+            &document,
+            &parse_css("#parent { height: 200px } #child { height: 50% }"),
+        );
+        let tree = layout(&document, &styled, 800.0, &HashMap::new(), &HashMap::new());
+        let child_id = document
+            .descendants(document.root())
+            .find(|node| matches!(&node.kind, NodeKind::Element(element) if element.attribute("id") == Some("child")))
+            .unwrap()
+            .id;
+        let child = tree
+            .boxes
+            .iter()
+            .find(|item| item.node_id == child_id)
+            .unwrap();
+
+        assert!((child.bounds.height - 100.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn percentage_height_with_indefinite_parent_uses_natural_height() {
+        let document = parse_html("<section id='parent'><div id='child'>content</div></section>");
+        let styled = style_document(
+            &document,
+            &parse_css("#parent { width: 400px } #child { height: 50% }"),
+        );
+        let tree = layout(&document, &styled, 800.0, &HashMap::new(), &HashMap::new());
+        let child_id = document
+            .descendants(document.root())
+            .find(|node| matches!(&node.kind, NodeKind::Element(element) if element.attribute("id") == Some("child")))
+            .unwrap()
+            .id;
+        let child = tree
+            .boxes
+            .iter()
+            .find(|item| item.node_id == child_id)
+            .unwrap();
+
+        assert!(child.bounds.height > 0.0);
+        assert!(child.bounds.height < 100.0);
     }
 
     #[test]
