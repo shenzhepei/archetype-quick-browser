@@ -12,6 +12,7 @@ members = [
   "crates/arch-store",
   "crates/arch-style",
 ]
+exclude = ["fuzz"]
 
 [workspace.package]
 version = "0.3.0"

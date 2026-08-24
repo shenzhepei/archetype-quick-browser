@@ -68,6 +68,16 @@ references. After an intentional rendering change, regenerate and review them wi
 cargo run -p arch-browser --example update_snapshots
 ```
 
+The restart-recovery integration test force-terminates a separate browser-profile process before
+checking that Spaces, nested bookmarks, tabs, titles, order, and selection survive. HTML and CSS
+parser fuzzing runs in CI. To reproduce either fuzz target locally, install nightly Rust and
+[`cargo-fuzz`](https://github.com/rust-fuzz/cargo-fuzz), then run:
+
+```bash
+cargo +nightly fuzz run html -- -max_total_time=20 -timeout=5
+cargo +nightly fuzz run css -- -max_total_time=20 -timeout=5
+```
+
 To generate the same LCOV report uploaded by CI, install
 [`cargo-llvm-cov`](https://github.com/taiki-e/cargo-llvm-cov) and run:
 
@@ -106,9 +116,10 @@ The scoped product requirements and detailed implementation plans are in:
   global tab persistence, hierarchical Space bookmark storage and root bookmark bar, navigation identity,
   redirects, links, and history; all 30 deterministic fixtures with corpus-wide assertions for
   titles, painted text, resolved links, loaded images, expected diagnostics, and fixed PNG
-  screenshot regression at the V3 0.5% pixel-difference threshold.
+  screenshot regression at the V3 0.5% pixel-difference threshold; force-exit profile recovery;
+  and CI fuzzing of the HTML and CSS parser entry points.
 - Remaining: complete the CSS/layout support matrix, improve font shaping and link interaction,
-  add fuzzing, record performance baselines, and gather release acceptance evidence.
+  record performance baselines, and gather release acceptance evidence.
 
 ## License
 

@@ -65,6 +65,15 @@ cargo test --workspace
 cargo run -p arch-browser --example update_snapshots
 ```
 
+重启恢复集成测试会强制终止独立的浏览器配置进程，再验证空间、分层书签、标签页、标题、顺序和
+选中项均可恢复。CI 会对 HTML 和 CSS 解析器执行模糊测试。如需在本地复现，请安装 Rust nightly
+和 [`cargo-fuzz`](https://github.com/rust-fuzz/cargo-fuzz)，然后运行：
+
+```bash
+cargo +nightly fuzz run html -- -max_total_time=20 -timeout=5
+cargo +nightly fuzz run css -- -max_total_time=20 -timeout=5
+```
+
 如需生成与 CI 上传内容相同的 LCOV 报告，请安装
 [`cargo-llvm-cov`](https://github.com/taiki-e/cargo-llvm-cov) 并运行：
 
@@ -101,8 +110,8 @@ cargo llvm-cov --workspace --lcov --output-path coverage/lcov.info
   全局标签页持久化、分层空间书签存储和根书签栏、导航标识、重定向、
   链接与历史；30 个确定性测试页面全部完成，并通过全语料断言验证标题、绘制文本、
   解析后的链接、已加载图片和预期诊断；固定 PNG 截图回归达到 V3 的 0.5% 像素差异阈值。
-- 待实现：完善 CSS/布局支持矩阵，改进字体塑形与链接交互，增加模糊测试，记录性能基线
-  并收集发布验收证据。
+  强制退出后的配置恢复，以及 HTML/CSS 解析器入口的 CI 模糊测试也已实现。
+- 待实现：完善 CSS/布局支持矩阵，改进字体塑形与链接交互，记录性能基线并收集发布验收证据。
 
 ## 许可证
 

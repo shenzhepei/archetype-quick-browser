@@ -1,5 +1,6 @@
 [package]
 name = "arch-browser"
+default-run = "arch-browser"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -32,3 +33,11 @@ uuid.workspace = true
 
 [lints]
 workspace = true
+
+[[bin]]
+name = "arch-browser"
+path = "src/main.rs"
+
+[[bin]]
+name = "arch-profile-probe"
+path = "src/bin/profile_probe.rs"

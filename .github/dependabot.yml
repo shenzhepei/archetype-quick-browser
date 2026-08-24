@@ -5,6 +5,11 @@ updates:
     directory: /
     schedule:
       interval: weekly
+  # cargo-fuzz requires an independent manifest outside the workspace.
+  - package-ecosystem: cargo
+    directory: /fuzz
+    schedule:
+      interval: weekly
   - package-ecosystem: github-actions
     directory: /
     schedule:
