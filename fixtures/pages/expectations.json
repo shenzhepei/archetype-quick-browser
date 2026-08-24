@@ -253,5 +253,45 @@
   "62-z-index": {
     "title": "V6 stable z index",
     "text": "Front layer"
+  },
+  "63-grid-fixed": {
+    "title": "V7 fixed grid tracks",
+    "text": "Fixed one"
+  },
+  "64-grid-fractions": {
+    "title": "V7 fractional grid tracks",
+    "text": "Two fractions"
+  },
+  "65-grid-percent": {
+    "title": "V7 percentage grid tracks",
+    "text": "Half"
+  },
+  "66-grid-repeat": {
+    "title": "V7 repeated grid tracks",
+    "text": "Repeat D"
+  },
+  "67-grid-multiple-rows": {
+    "title": "V7 grid multiple rows",
+    "text": "Row two A"
+  },
+  "68-border-radius": {
+    "title": "V7 rounded corners",
+    "text": "Rounded panel corners"
+  },
+  "69-opacity": {
+    "title": "V7 element opacity",
+    "text": "Translucent foreground"
+  },
+  "70-box-shadow": {
+    "title": "V7 bounded box shadow",
+    "text": "Single bounded shadow"
+  },
+  "71-text-decoration": {
+    "title": "V7 text decoration",
+    "text": "Underlined status text"
+  },
+  "72-grid-visual-composition": {
+    "title": "V7 grid visual composition",
+    "text": "Completed card"
   }
 }
