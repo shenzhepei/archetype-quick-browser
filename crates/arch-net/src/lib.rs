@@ -78,9 +78,13 @@ impl Loader {
     /// # Errors
     /// Returns [`LoadError`] when the TLS-enabled client cannot be constructed.
     pub fn new() -> Result<Self, LoadError> {
+        Self::with_timeouts(Duration::from_secs(10), Duration::from_secs(30))
+    }
+
+    fn with_timeouts(connect_timeout: Duration, timeout: Duration) -> Result<Self, LoadError> {
         let client = Client::builder()
-            .connect_timeout(Duration::from_secs(10))
-            .timeout(Duration::from_secs(30))
+            .connect_timeout(connect_timeout)
+            .timeout(timeout)
             .redirect(reqwest::redirect::Policy::limited(10))
             .build()?;
         Ok(Self { client })
@@ -165,6 +169,12 @@ fn ensure_limit(body: &[u8], limit: usize) -> Result<(), LoadError> {
 
 #[cfg(test)]
 mod tests {
+    use std::{
+        io::{Read as _, Write as _},
+        net::TcpListener,
+        thread,
+    };
+
     use super::*;
 
     #[test]
@@ -189,5 +199,83 @@ mod tests {
     fn recognizes_tls_errors_in_an_error_chain() {
         let error = rustls::Error::General("certificate validation failed".to_owned());
         assert!(error_chain_contains_tls(&error));
+    }
+
+    #[test]
+    fn loads_http_and_follows_a_redirect() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = thread::spawn(move || {
+            for expected_path in ["/start", "/final"] {
+                let (mut stream, _) = listener.accept().unwrap();
+                let mut request = [0u8; 1024];
+                let length = stream.read(&mut request).unwrap();
+                let request = String::from_utf8_lossy(&request[..length]);
+                assert!(request.starts_with(&format!("GET {expected_path} ")));
+                if expected_path == "/start" {
+                    write!(
+                        stream,
+                        "HTTP/1.1 302 Found\r\nLocation: /final\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                    )
+                    .unwrap();
+                } else {
+                    write!(
+                        stream,
+                        "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: 12\r\nConnection: close\r\n\r\n<p>ready</p>"
+                    )
+                    .unwrap();
+                }
+            }
+        });
+        let response = Loader::default()
+            .load(&Url::parse(&format!("http://{address}/start")).unwrap())
+            .unwrap();
+        server.join().unwrap();
+        assert_eq!(response.final_url.path(), "/final");
+        assert_eq!(response.body, b"<p>ready</p>");
+        assert_eq!(response.content_type.as_deref(), Some("text/html"));
+    }
+
+    #[test]
+    fn classifies_http_status_connection_and_timeout_failures() {
+        let status_listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let status_address = status_listener.local_addr().unwrap();
+        let status_server = thread::spawn(move || {
+            let (mut stream, _) = status_listener.accept().unwrap();
+            let mut request = [0u8; 1024];
+            let _ = stream.read(&mut request).unwrap();
+            write!(
+                stream,
+                "HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+            )
+            .unwrap();
+        });
+        let status_error = Loader::default()
+            .load(&Url::parse(&format!("http://{status_address}/")).unwrap())
+            .unwrap_err();
+        status_server.join().unwrap();
+        assert_eq!(status_error.kind(), LoadErrorKind::HttpStatus);
+
+        let refused_listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let refused_address = refused_listener.local_addr().unwrap();
+        drop(refused_listener);
+        let connection_error = Loader::default()
+            .load(&Url::parse(&format!("http://{refused_address}/")).unwrap())
+            .unwrap_err();
+        assert_eq!(connection_error.kind(), LoadErrorKind::Connection);
+
+        let timeout_listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let timeout_address = timeout_listener.local_addr().unwrap();
+        let timeout_server = thread::spawn(move || {
+            let (_stream, _) = timeout_listener.accept().unwrap();
+            thread::sleep(Duration::from_millis(200));
+        });
+        let timeout_error =
+            Loader::with_timeouts(Duration::from_millis(25), Duration::from_millis(25))
+                .unwrap()
+                .load(&Url::parse(&format!("http://{timeout_address}/")).unwrap())
+                .unwrap_err();
+        timeout_server.join().unwrap();
+        assert_eq!(timeout_error.kind(), LoadErrorKind::Timeout);
     }
 }
