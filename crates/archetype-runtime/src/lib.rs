@@ -277,7 +277,7 @@ fn resource_is_same_origin(base: &Url, resource: &BrokeredResource) -> bool {
 
 fn same_origin(document: &Url, resource: &Url) -> bool {
     match document.scheme() {
-        "file" => resource.scheme() == "file",
+        "file" => file_resource_is_scoped(document, resource),
         "http" | "https" => {
             document.scheme() == resource.scheme()
                 && document.host_str() == resource.host_str()
@@ -285,6 +285,21 @@ fn same_origin(document: &Url, resource: &Url) -> bool {
         }
         _ => false,
     }
+}
+
+fn file_resource_is_scoped(document: &Url, resource: &Url) -> bool {
+    if resource.scheme() != "file" {
+        return false;
+    }
+    let Ok(document_path) = document.to_file_path() else {
+        return false;
+    };
+    let Ok(resource_path) = resource.to_file_path() else {
+        return false;
+    };
+    document_path
+        .parent()
+        .is_some_and(|directory| resource_path.starts_with(directory))
 }
 
 fn link_targets(document: &arch_dom::Document, base: &Url) -> HashMap<NodeId, String> {

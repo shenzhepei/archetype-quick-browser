@@ -168,7 +168,7 @@ fn resource_urls(
 
 fn same_origin(document: &Url, resource: &Url) -> bool {
     match document.scheme() {
-        "file" => resource.scheme() == "file",
+        "file" => file_resource_is_scoped(document, resource),
         "http" | "https" => {
             document.scheme() == resource.scheme()
                 && document.host_str() == resource.host_str()
@@ -176,6 +176,28 @@ fn same_origin(document: &Url, resource: &Url) -> bool {
         }
         _ => false,
     }
+}
+
+fn file_resource_is_scoped(document: &Url, resource: &Url) -> bool {
+    if resource.scheme() != "file" {
+        return false;
+    }
+    let Ok(document_path) = document.to_file_path() else {
+        return false;
+    };
+    let Ok(resource_path) = resource.to_file_path() else {
+        return false;
+    };
+    let Some(document_directory) = document_path.parent() else {
+        return false;
+    };
+    let Ok(document_directory) = document_directory.canonicalize() else {
+        return false;
+    };
+    let Ok(resource_path) = resource_path.canonicalize() else {
+        return false;
+    };
+    resource_path.starts_with(document_directory)
 }
 
 fn protocol_url(url: &Url) -> Result<ArchetypeUrl, BrokerError> {
@@ -248,5 +270,32 @@ mod tests {
             }
         ));
         fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn local_documents_cannot_broker_files_outside_their_directory_tree() {
+        let root = std::env::temp_dir().join(format!("archetype-scope-{}", PageId::new()));
+        let document_directory = root.join("document");
+        fs::create_dir_all(&document_directory).unwrap();
+        fs::write(root.join("secret.png"), b"not available to the document").unwrap();
+        let path = document_directory.join("index.html");
+        fs::write(&path, "<img src='../secret.png' alt='secret'>").unwrap();
+        let request = BrokerRequest {
+            page_id: PageId::new(),
+            navigation_id: NavigationId::zero(),
+            url: Url::from_file_path(path).unwrap(),
+            viewport_width_px: 800,
+        };
+
+        let document = load_static_document(&Loader::default(), &request).unwrap();
+
+        assert!(document.resources.is_empty());
+        assert!(
+            document
+                .broker_diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.contains("cross-origin image"))
+        );
+        fs::remove_dir_all(root).unwrap();
     }
 }
