@@ -1,5 +1,7 @@
 use arch_paint::DisplayList;
-use archetype_protocol::{Codec, Envelope, Message, Request, Response};
+use archetype_protocol::{
+    BrokeredResource, Codec, Envelope, Message, Request, ResourceBytes, ResourceKind, Response,
+};
 use archetype_types::{ArchetypeUrl, NavigationId, PageId};
 
 #[test]
@@ -17,6 +19,12 @@ fn static_document_messages_round_trip_with_a_display_list() {
             url: url.clone(),
             html: "<!doctype html><title>Example</title><p>Hello</p>".to_owned(),
             viewport_width_px: 1280,
+            resources: vec![BrokeredResource {
+                requested_url: "https://example.test/image.png".parse().unwrap(),
+                final_url: "https://example.test/image.png".parse().unwrap(),
+                kind: ResourceKind::Image,
+                body: ResourceBytes::new(vec![0, 1, 2, 254, 255]),
+            }],
         }),
     );
     let response = Envelope::v4(
@@ -39,4 +47,9 @@ fn static_document_messages_round_trip_with_a_display_list() {
         Codec::default().encode(&mut frame, &envelope).unwrap();
         assert_eq!(Codec::default().decode(frame.as_slice()).unwrap(), envelope);
     }
+}
+
+#[test]
+fn resource_bytes_reject_invalid_base64() {
+    assert!(serde_json::from_str::<ResourceBytes>("\"not base64!\"").is_err());
 }

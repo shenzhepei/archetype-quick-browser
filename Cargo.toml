@@ -25,6 +25,7 @@ rust-version = "1.85"
 
 [workspace.dependencies]
 anyhow = "1.0"
+base64 = "0.22"
 cssparser = "0.37"
 cosmic-text = "0.14.2"
 fontdb = "0.16.2"

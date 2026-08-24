@@ -5,6 +5,7 @@ use std::{
 
 use arch_paint::DisplayList;
 use archetype_types::{ArchetypeUrl, NavigationId, PageId};
+use base64::{Engine as _, engine::general_purpose::STANDARD};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use thiserror::Error;
@@ -104,6 +105,63 @@ pub struct Rejected {
     pub message: String,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ResourceKind {
+    Stylesheet,
+    Image,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ResourceBytes(Vec<u8>);
+
+impl ResourceBytes {
+    #[must_use]
+    pub const fn new(bytes: Vec<u8>) -> Self {
+        Self(bytes)
+    }
+
+    #[must_use]
+    pub fn as_slice(&self) -> &[u8] {
+        &self.0
+    }
+
+    #[must_use]
+    pub fn into_vec(self) -> Vec<u8> {
+        self.0
+    }
+}
+
+impl Serialize for ResourceBytes {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(&STANDARD.encode(&self.0))
+    }
+}
+
+impl<'de> Deserialize<'de> for ResourceBytes {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let encoded = String::deserialize(deserializer)?;
+        STANDARD
+            .decode(encoded)
+            .map(Self)
+            .map_err(serde::de::Error::custom)
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct BrokeredResource {
+    pub requested_url: ArchetypeUrl,
+    pub final_url: ArchetypeUrl,
+    pub kind: ResourceKind,
+    pub body: ResourceBytes,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Request {
@@ -118,6 +176,7 @@ pub enum Request {
         url: ArchetypeUrl,
         html: String,
         viewport_width_px: u32,
+        resources: Vec<BrokeredResource>,
     },
     Cancel {
         target_request_id: u64,
