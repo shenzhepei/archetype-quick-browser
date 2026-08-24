@@ -15,6 +15,7 @@ members = [
   "crates/arch-store",
   "crates/arch-style",
   "crates/archetype-sdk",
+  "crates/archetype-raster",
 ]
 exclude = ["fuzz"]
 

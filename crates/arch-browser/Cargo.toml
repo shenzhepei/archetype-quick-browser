@@ -9,6 +9,7 @@ rust-version.workspace = true
 [dependencies]
 anyhow.workspace = true
 archetype-protocol = { path = "../archetype-protocol" }
+archetype-raster = { path = "../archetype-raster" }
 archetype-sdk = { path = "../archetype-sdk", features = ["internal-runtime-client"] }
 archetype-types = { path = "../archetype-types" }
 arch-css = { path = "../arch-css" }

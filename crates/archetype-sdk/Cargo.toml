@@ -10,6 +10,7 @@ internal-runtime-client = []
 
 [dependencies]
 arch-paint = { path = "../arch-paint" }
+archetype-raster = { path = "../archetype-raster" }
 archetype-protocol = { path = "../archetype-protocol" }
 archetype-types = { path = "../archetype-types" }
 getrandom.workspace = true

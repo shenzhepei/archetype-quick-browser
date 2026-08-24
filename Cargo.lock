@@ -124,6 +124,7 @@ dependencies = [
  "arch-store",
  "arch-style",
  "archetype-protocol",
+ "archetype-raster",
  "archetype-sdk",
  "archetype-types",
  "chacha20poly1305",
@@ -248,6 +249,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "archetype-raster"
+version = "0.5.0"
+dependencies = [
+ "anyhow",
+ "arch-layout",
+ "arch-paint",
+ "cosmic-text",
+ "fontdb 0.16.2",
+ "image",
+]
+
+[[package]]
 name = "archetype-runtime"
 version = "0.5.0"
 dependencies = [
@@ -274,6 +287,7 @@ version = "0.1.0"
 dependencies = [
  "arch-paint",
  "archetype-protocol",
+ "archetype-raster",
  "archetype-types",
  "getrandom 0.3.4",
  "thiserror 2.0.20",
