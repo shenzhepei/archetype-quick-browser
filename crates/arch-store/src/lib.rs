@@ -48,11 +48,17 @@ CREATE TABLE IF NOT EXISTS cookie_state (
   ciphertext BLOB NOT NULL CHECK(length(ciphertext) > 0),
   updated_at INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS page_hibernation (
+  page_id TEXT PRIMARY KEY REFERENCES pages(id) ON DELETE CASCADE,
+  snapshot_json TEXT NOT NULL,
+  updated_at INTEGER NOT NULL
+);
 INSERT OR IGNORE INTO schema_migrations(version, applied_at)
 VALUES
   (1, CAST(unixepoch('subsec') * 1000 AS INTEGER)),
   (2, CAST(unixepoch('subsec') * 1000 AS INTEGER)),
-  (3, CAST(unixepoch('subsec') * 1000 AS INTEGER));
+  (3, CAST(unixepoch('subsec') * 1000 AS INTEGER)),
+  (4, CAST(unixepoch('subsec') * 1000 AS INTEGER));
 ";
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -117,7 +123,7 @@ pub struct Store {
 }
 
 impl Store {
-    /// Opens or creates a schema-v3 database.
+    /// Opens or creates a schema-v4 database.
     ///
     /// # Errors
     /// Returns [`StoreError`] when `SQLite` cannot open, configure, or migrate the database.
@@ -144,7 +150,7 @@ impl Store {
         Ok(Self { connection })
     }
 
-    /// Creates an isolated schema-v3 database for tests and transient use.
+    /// Creates an isolated schema-v4 database for tests and transient use.
     ///
     /// # Errors
     /// Returns [`StoreError`] when `SQLite` cannot create, configure, or migrate the database.
@@ -383,6 +389,48 @@ impl Store {
                 },
             )
             .optional()?)
+    }
+
+    /// Stores versioned hibernation metadata for one page.
+    ///
+    /// # Errors
+    /// Returns [`StoreError`] when the page does not exist or `SQLite` rejects the write.
+    pub fn save_page_hibernation(
+        &self,
+        page_id: &str,
+        snapshot_json: &str,
+    ) -> Result<(), StoreError> {
+        self.connection.execute(
+            "INSERT INTO page_hibernation(page_id, snapshot_json, updated_at) VALUES (?, ?, ?) ON CONFLICT(page_id) DO UPDATE SET snapshot_json = excluded.snapshot_json, updated_at = excluded.updated_at",
+            params![page_id, snapshot_json, now_ms()],
+        )?;
+        Ok(())
+    }
+
+    /// Loads one page's versioned hibernation metadata.
+    ///
+    /// # Errors
+    /// Returns [`StoreError`] when `SQLite` cannot read the profile.
+    pub fn page_hibernation(&self, page_id: &str) -> Result<Option<String>, StoreError> {
+        Ok(self
+            .connection
+            .query_row(
+                "SELECT snapshot_json FROM page_hibernation WHERE page_id = ?",
+                [page_id],
+                |row| row.get(0),
+            )
+            .optional()?)
+    }
+
+    /// Clears hibernation metadata after a successful wake.
+    ///
+    /// # Errors
+    /// Returns [`StoreError`] when `SQLite` cannot update the profile.
+    pub fn delete_page_hibernation(&self, page_id: &str) -> Result<bool, StoreError> {
+        Ok(self
+            .connection
+            .execute("DELETE FROM page_hibernation WHERE page_id = ?", [page_id])?
+            > 0)
     }
 
     /// Inserts a URL bookmark into a Space folder or its root.
@@ -629,7 +677,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn initializes_empty_database_through_schema_v3() {
+    fn initializes_empty_database_through_schema_v4() {
         let store = Store::in_memory().unwrap();
         let mut statement = store
             .connection
@@ -640,7 +688,7 @@ mod tests {
             .unwrap()
             .collect::<Result<Vec<_>, _>>()
             .unwrap();
-        assert_eq!(versions, [1, 2, 3]);
+        assert_eq!(versions, [1, 2, 3, 4]);
     }
 
     #[test]
@@ -770,7 +818,7 @@ mod tests {
     }
 
     #[test]
-    fn upgrades_schema_v2_to_v3_without_losing_profile_data() {
+    fn upgrades_schema_v2_to_v4_without_losing_profile_data() {
         let directory = std::env::temp_dir().join(format!("archetype-store-{}", Uuid::now_v7()));
         fs::create_dir(&directory).unwrap();
         let path = directory.join("profile.db");
@@ -804,9 +852,23 @@ mod tests {
                 row.get(0)
             })
             .unwrap();
-        assert_eq!(version, 3);
+        assert_eq!(version, 4);
         drop(store);
         fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn stores_hibernation_metadata_and_cascades_page_deletion() {
+        let mut store = Store::in_memory().unwrap();
+        let page = store.create_page("https://example.com/").unwrap();
+        let snapshot = r#"{"version":1,"title":"Example","form_dirty":false}"#;
+        store.save_page_hibernation(&page.id, snapshot).unwrap();
+        assert_eq!(
+            store.page_hibernation(&page.id).unwrap().as_deref(),
+            Some(snapshot)
+        );
+        assert!(store.delete_page(&page.id).unwrap());
+        assert!(store.page_hibernation(&page.id).unwrap().is_none());
     }
 
     #[test]

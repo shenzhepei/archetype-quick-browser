@@ -11,6 +11,7 @@ use arch_browser::{
 };
 use arch_net::{LoadError, LoadErrorKind, Loader};
 use arch_paint::{DisplayCommand, PaintColor};
+use arch_session::Viewport;
 use arch_session::forms::{ControlId, ControlKind};
 use arch_store::{Bookmark, BookmarkKind, Page, Space};
 use arch_style::{FontStyle as PageFontStyle, FontWeight as PageFontWeight, TextAlign};
@@ -18,7 +19,7 @@ use gpui::{
     AnyElement, AppContext as _, Application, AssetSource, Context, Entity, FontWeight,
     InteractiveElement as _, IntoElement, ParentElement, Render, ScrollHandle, SharedString,
     StatefulInteractiveElement as _, Styled, Subscription, Task, Window, WindowBounds,
-    WindowOptions, div, img, prelude::FluentBuilder as _, px, rgba, size,
+    WindowOptions, div, img, point, prelude::FluentBuilder as _, px, rgba, size,
 };
 use gpui_component::{
     ActiveTheme as _, Disableable as _, Icon, IconName, IconNamed, Root, Sizable as _,
@@ -237,6 +238,8 @@ struct QuickBrowser {
     loading_pages: HashSet<String>,
     navigation_tasks: HashMap<String, Task<()>>,
     tab_scroll: ScrollHandle,
+    content_scroll: ScrollHandle,
+    hibernated_pages: HashSet<String>,
     address_input: Entity<InputState>,
     space_input: Entity<InputState>,
     folder_input: Entity<InputState>,
@@ -279,6 +282,11 @@ impl QuickBrowser {
             .and_then(|id| core.bookmarks(id, None).ok())
             .unwrap_or_default();
         let pages = core.pages().unwrap_or_default();
+        let hibernated_pages = pages
+            .iter()
+            .filter(|page| core.page_hibernation(page).ok().flatten().is_some())
+            .map(|page| page.id.clone())
+            .collect();
         let selected_page = saved
             .1
             .filter(|id| pages.iter().any(|page| &page.id == id))
@@ -336,6 +344,8 @@ impl QuickBrowser {
             loading_pages: HashSet::new(),
             navigation_tasks: HashMap::new(),
             tab_scroll: ScrollHandle::new(),
+            content_scroll: ScrollHandle::new(),
+            hibernated_pages,
             address_input,
             space_input,
             folder_input,
@@ -500,6 +510,9 @@ impl QuickBrowser {
 
     fn select_page(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
         self.error = None;
+        if self.selected_page.as_deref() != Some(id) {
+            self.hibernate_selected_page();
+        }
         self.selected_page = Some(id.to_owned());
         self.scroll_to_selected_tab();
         let page = self.selected_page_record().cloned();
@@ -509,13 +522,66 @@ impl QuickBrowser {
             .unwrap_or_default();
         self.set_address(address, window, cx);
         self.persist_selection();
-        if let Some(page) = page
-            && !self.rendered_pages.contains_key(&page.id)
-            && !self.loading_pages.contains(&page.id)
+        if let Some(page) = page {
+            if self.hibernated_pages.contains(&page.id) {
+                self.wake_hibernated_page(&page, window, cx);
+            } else if !self.rendered_pages.contains_key(&page.id)
+                && !self.loading_pages.contains(&page.id)
+            {
+                self.reload_page(page, window, cx);
+            } else {
+                cx.notify();
+            }
+        }
+    }
+
+    fn hibernate_selected_page(&mut self) {
+        let Some(page) = self.selected_page_record().cloned() else {
+            return;
+        };
+        let Some(rendered) = self.rendered_pages.get(&page.id) else {
+            return;
+        };
+        let scroll_y = f32::from(-self.content_scroll.offset().y).max(0.0);
+        if self
+            .core
+            .hibernate_page(
+                &page,
+                rendered,
+                Viewport {
+                    width: 960.0,
+                    height: 640.0,
+                },
+                scroll_y,
+                true,
+            )
+            .is_ok()
         {
-            self.reload_page(page, window, cx);
-        } else {
-            cx.notify();
+            self.rendered_pages.remove(&page.id);
+            self.form_inputs.retain(|key, _| key.page_id != page.id);
+            self.form_subscriptions.remove(&page.id);
+            self.hibernated_pages.insert(page.id);
+        }
+    }
+
+    fn wake_hibernated_page(&mut self, page: &Page, window: &mut Window, cx: &mut Context<Self>) {
+        let scroll_y = self
+            .core
+            .page_hibernation(page)
+            .ok()
+            .flatten()
+            .map_or(0.0, |snapshot| snapshot.scroll_y);
+        match self.core.wake_page(page, 960.0) {
+            Ok(rendered) => {
+                self.hibernated_pages.remove(&page.id);
+                self.apply_rendered(page, rendered, window, cx);
+                self.content_scroll
+                    .set_offset(point(px(0.0), px(-scroll_y)));
+            }
+            Err(error) => {
+                self.error = Some(ErrorView::navigation(self.language, &error));
+                cx.notify();
+            }
         }
     }
 
@@ -536,6 +602,7 @@ impl QuickBrowser {
         self.rendered_pages.remove(id);
         self.form_inputs.retain(|key, _| key.page_id != id);
         self.form_subscriptions.remove(id);
+        self.hibernated_pages.remove(id);
         self.pages.retain(|item| item.id != id);
         if closing_selected {
             self.selected_page = adjacent_page;
@@ -739,6 +806,7 @@ impl QuickBrowser {
         }
         if self.selected_page.as_deref() == Some(page.id.as_str()) {
             self.set_address(rendered.final_url.to_string(), window, cx);
+            self.content_scroll.set_offset(point(px(0.0), px(0.0)));
         }
         if let Some(current) = self.pages.iter_mut().find(|item| item.id == page.id) {
             current.url = rendered.final_url.to_string();
@@ -1584,6 +1652,7 @@ impl QuickBrowser {
             .id("browser-content")
             .size_full()
             .overflow_y_scroll()
+            .track_scroll(&self.content_scroll)
             .bg(gpui::white())
             .p_5()
             .child(canvas)

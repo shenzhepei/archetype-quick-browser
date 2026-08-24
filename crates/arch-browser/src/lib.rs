@@ -5,7 +5,7 @@ use arch_dom::NodeKind;
 use arch_net::{LoadError, LoadErrorKind, Loader, ResponseBytes};
 use arch_paint::DisplayList;
 use arch_session::{
-    BrowserCommand, BrowserEvent, Session,
+    BrowserCommand, BrowserEvent, HibernationSnapshot, Session, Viewport,
     cookies::{CookieJar, CookieRequest},
     forms::{
         ControlId, ControlKind, FormControl, FormMethod, FormState, FormSubmission, SelectOption,
@@ -146,6 +146,16 @@ impl BrowserCore {
         };
         for page in core.store.pages()? {
             if let Ok(id) = page.id.parse::<PageId>() {
+                let restored = core
+                    .store
+                    .page_hibernation(&page.id)?
+                    .and_then(|value| serde_json::from_str::<HibernationSnapshot>(&value).ok())
+                    .is_some_and(|snapshot| {
+                        snapshot.page_id == id && core.session.restore_hibernation(snapshot).is_ok()
+                    });
+                if restored {
+                    continue;
+                }
                 if let Ok(url) = page.url.parse::<ArchetypeUrl>() {
                     core.session.restore_page(id, url);
                 } else {
@@ -296,6 +306,78 @@ impl BrowserCore {
         let id = page.id.parse::<PageId>().context("page has invalid UUID")?;
         self.session.close_page(&id);
         Ok(self.store.delete_page(&page.id)?)
+    }
+
+    /// Persists a page's bounded recovery metadata and invalidates active work.
+    ///
+    /// # Errors
+    /// Returns an error when the page is invalid, automatic hibernation is blocked by a dirty
+    /// form, or the snapshot cannot be persisted.
+    pub fn hibernate_page(
+        &mut self,
+        page: &Page,
+        rendered: &RenderedPage,
+        viewport: Viewport,
+        scroll_y: f32,
+        automatic: bool,
+    ) -> Result<()> {
+        let page_id = parsed_page_id(page).context("page has invalid UUID")?;
+        let form_dirty = rendered.forms.iter().any(FormState::is_dirty);
+        let snapshot = self
+            .session
+            .hibernation_snapshot(
+                &page_id,
+                rendered.title.clone(),
+                viewport,
+                scroll_y,
+                form_dirty,
+                automatic,
+            )
+            .context("page cannot hibernate")?;
+        let encoded = serde_json::to_string(&snapshot).context("could not encode page snapshot")?;
+        self.store
+            .save_page_hibernation(&page.id, &encoded)
+            .context("could not persist page snapshot")?;
+        let _ = self.stop(page)?;
+        Ok(())
+    }
+
+    /// Restores hibernation metadata and recreates page content through navigation.
+    ///
+    /// # Errors
+    /// Returns an error when metadata is invalid or re-navigation fails.
+    pub fn wake_page(&mut self, page: &Page, viewport_width: f32) -> Result<RenderedPage> {
+        if let Some(encoded) = self.store.page_hibernation(&page.id)? {
+            let snapshot: HibernationSnapshot =
+                serde_json::from_str(&encoded).context("could not decode page snapshot")?;
+            let page_id = parsed_page_id(page).context("page has invalid UUID")?;
+            if snapshot.page_id != page_id {
+                anyhow::bail!("page snapshot identity does not match");
+            }
+            self.session
+                .restore_hibernation(snapshot)
+                .context("could not restore page snapshot")?;
+        }
+        let rendered = self.reload(page, viewport_width)?;
+        self.store.delete_page_hibernation(&page.id)?;
+        Ok(rendered)
+    }
+
+    /// Reads validated hibernation metadata without waking the page.
+    ///
+    /// # Errors
+    /// Returns an error when storage or snapshot validation fails.
+    pub fn page_hibernation(&self, page: &Page) -> Result<Option<HibernationSnapshot>> {
+        let Some(encoded) = self.store.page_hibernation(&page.id)? else {
+            return Ok(None);
+        };
+        let snapshot: HibernationSnapshot =
+            serde_json::from_str(&encoded).context("could not decode page snapshot")?;
+        let page_id = parsed_page_id(page).context("page has invalid UUID")?;
+        if snapshot.page_id != page_id {
+            anyhow::bail!("page snapshot identity does not match");
+        }
+        Ok(Some(snapshot))
     }
 
     /// Navigates a page and commits only the newest navigation result.
@@ -1579,6 +1661,91 @@ mod tests {
         let _ = fs::remove_file(&path);
         let _ = fs::remove_file(path.with_extension("db-shm"));
         let _ = fs::remove_file(path.with_extension("db-wal"));
+    }
+
+    #[test]
+    fn hibernated_page_restores_history_and_wakes_by_navigation() {
+        let path = std::env::temp_dir().join(format!("archetype-hibernate-{}.db", Uuid::now_v7()));
+        let first_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../fixtures/pages/01-document/index.html")
+            .canonicalize()
+            .unwrap();
+        let second_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../fixtures/pages/02-cascade/index.html")
+            .canonicalize()
+            .unwrap();
+        let first_url = Url::from_file_path(first_path).unwrap();
+        let second_url = Url::from_file_path(second_path).unwrap();
+        {
+            let mut core = BrowserCore::open(&path).unwrap();
+            let page = core.create_page(&first_url).unwrap();
+            core.navigate(&page, &first_url, 960.0).unwrap();
+            core.navigate(&page, &second_url, 960.0).unwrap();
+            let rendered = core.back(&page, 960.0).unwrap();
+            core.hibernate_page(
+                &page,
+                &rendered,
+                Viewport {
+                    width: 960.0,
+                    height: 640.0,
+                },
+                128.0,
+                true,
+            )
+            .unwrap();
+        }
+        {
+            let mut core = BrowserCore::open(&path).unwrap();
+            let page = core.pages().unwrap().remove(0);
+            assert!(core.can_go_forward(&page));
+            let rendered = core.wake_page(&page, 960.0).unwrap();
+            assert_eq!(rendered.title, "Archetype V3 Fixture");
+            assert!(core.can_go_forward(&page));
+            assert!(core.store.page_hibernation(&page.id).unwrap().is_none());
+        }
+        let _ = fs::remove_file(&path);
+        let _ = fs::remove_file(path.with_extension("db-shm"));
+        let _ = fs::remove_file(path.with_extension("db-wal"));
+    }
+
+    #[test]
+    fn automatic_hibernation_never_persists_dirty_form_values() {
+        let directory =
+            std::env::temp_dir().join(format!("archetype-dirty-form-{}", Uuid::now_v7()));
+        fs::create_dir(&directory).unwrap();
+        let html = directory.join("form.html");
+        fs::write(
+            &html,
+            "<title>Form</title><form><input name='secret'><button>Send</button></form>",
+        )
+        .unwrap();
+        let database = directory.join("profile.db");
+        let url = Url::from_file_path(&html).unwrap();
+        let mut core = BrowserCore::open(&database).unwrap();
+        let page = core.create_page(&url).unwrap();
+        let mut rendered = core.navigate(&page, &url, 960.0).unwrap();
+        let control_id = rendered.forms[0].controls[0].id;
+        rendered.forms[0]
+            .set_text(control_id, "super-secret".to_owned())
+            .unwrap();
+        assert!(
+            core.hibernate_page(
+                &page,
+                &rendered,
+                Viewport {
+                    width: 960.0,
+                    height: 640.0,
+                },
+                0.0,
+                true,
+            )
+            .is_err()
+        );
+        assert!(core.store.page_hibernation(&page.id).unwrap().is_none());
+        drop(core);
+        let bytes = fs::read(&database).unwrap();
+        assert!(!bytes.windows(12).any(|window| window == b"super-secret"));
+        fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]

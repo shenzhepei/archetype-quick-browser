@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 pub use archetype_types::{ArchetypeUrl, LoadStage, NavigationId, PageId};
 use serde::{Deserialize, Serialize};
+use thiserror::Error;
 
 pub mod cookies;
 pub mod forms;
@@ -10,6 +11,35 @@ pub mod forms;
 pub struct Viewport {
     pub width: f32,
     pub height: f32,
+}
+
+pub const HIBERNATION_SNAPSHOT_VERSION: u16 = 1;
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct HibernationSnapshot {
+    pub version: u16,
+    pub page_id: PageId,
+    pub url: ArchetypeUrl,
+    pub title: String,
+    pub history: Vec<ArchetypeUrl>,
+    pub cursor: usize,
+    pub viewport: Viewport,
+    pub scroll_y: f32,
+    pub form_dirty: bool,
+}
+
+#[derive(Clone, Copy, Debug, Eq, Error, PartialEq)]
+pub enum HibernationError {
+    #[error("page does not exist")]
+    MissingPage,
+    #[error("automatic hibernation is blocked by an unsubmitted form")]
+    DirtyForm,
+    #[error("hibernation snapshot version is unsupported")]
+    UnsupportedVersion,
+    #[error("hibernation snapshot history is invalid")]
+    InvalidHistory,
+    #[error("hibernation snapshot viewport or scroll metadata is invalid")]
+    InvalidGeometry,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -107,6 +137,90 @@ impl Session {
 
     pub fn close_page(&mut self, page_id: &PageId) {
         self.pages.remove(page_id);
+    }
+
+    /// Captures bounded page metadata without DOM, page content, or form values.
+    ///
+    /// # Errors
+    /// Returns [`HibernationError`] when the page is missing or automatic hibernation would
+    /// discard an unsubmitted form.
+    pub fn hibernation_snapshot(
+        &self,
+        page_id: &PageId,
+        title: String,
+        viewport: Viewport,
+        scroll_y: f32,
+        form_dirty: bool,
+        automatic: bool,
+    ) -> Result<HibernationSnapshot, HibernationError> {
+        if automatic && form_dirty {
+            return Err(HibernationError::DirtyForm);
+        }
+        let page = self
+            .pages
+            .get(page_id)
+            .ok_or(HibernationError::MissingPage)?;
+        let url = page
+            .history
+            .get(page.cursor)
+            .cloned()
+            .ok_or(HibernationError::InvalidHistory)?;
+        if viewport.width <= 0.0
+            || viewport.height <= 0.0
+            || !viewport.width.is_finite()
+            || !viewport.height.is_finite()
+            || scroll_y < 0.0
+            || !scroll_y.is_finite()
+        {
+            return Err(HibernationError::InvalidGeometry);
+        }
+        Ok(HibernationSnapshot {
+            version: HIBERNATION_SNAPSHOT_VERSION,
+            page_id: page_id.clone(),
+            url,
+            title,
+            history: page.history.clone(),
+            cursor: page.cursor,
+            viewport,
+            scroll_y,
+            form_dirty,
+        })
+    }
+
+    /// Restores validated metadata. Page content must be recreated by navigation.
+    ///
+    /// # Errors
+    /// Returns [`HibernationError`] when the version, history, or geometry is invalid.
+    pub fn restore_hibernation(
+        &mut self,
+        snapshot: HibernationSnapshot,
+    ) -> Result<(), HibernationError> {
+        if snapshot.version != HIBERNATION_SNAPSHOT_VERSION {
+            return Err(HibernationError::UnsupportedVersion);
+        }
+        if snapshot.history.get(snapshot.cursor) != Some(&snapshot.url) {
+            return Err(HibernationError::InvalidHistory);
+        }
+        if snapshot.viewport.width <= 0.0
+            || snapshot.viewport.height <= 0.0
+            || !snapshot.viewport.width.is_finite()
+            || !snapshot.viewport.height.is_finite()
+            || snapshot.scroll_y < 0.0
+            || !snapshot.scroll_y.is_finite()
+        {
+            return Err(HibernationError::InvalidGeometry);
+        }
+        self.pages.insert(
+            snapshot.page_id,
+            PageState {
+                history: snapshot.history,
+                cursor: snapshot.cursor,
+                viewport: snapshot.viewport,
+                scroll_y: snapshot.scroll_y,
+                navigation_id: NavigationId::zero(),
+            },
+        );
+        Ok(())
     }
 
     #[must_use]
@@ -372,5 +486,99 @@ mod tests {
             } if stopped_id == navigation_id
         ));
         assert!(!session.accepts(&page_id, navigation_id));
+    }
+
+    #[test]
+    fn hibernation_round_trip_restores_history_and_metadata() {
+        let mut session = Session::default();
+        let page_id = PageId::new();
+        for url in ["https://example.com/one", "https://example.com/two"] {
+            let _ = session.handle(BrowserCommand::Navigate {
+                page_id: page_id.clone(),
+                url: parse_url(url),
+            });
+        }
+        let _ = session.handle(BrowserCommand::Back {
+            page_id: page_id.clone(),
+        });
+        let snapshot = session
+            .hibernation_snapshot(
+                &page_id,
+                "One".to_owned(),
+                Viewport {
+                    width: 960.0,
+                    height: 640.0,
+                },
+                128.0,
+                false,
+                true,
+            )
+            .unwrap();
+        let encoded = serde_json::to_vec(&snapshot).unwrap();
+        assert!(!String::from_utf8_lossy(&encoded).contains("password"));
+
+        let mut restored = Session::default();
+        restored
+            .restore_hibernation(serde_json::from_slice(&encoded).unwrap())
+            .unwrap();
+        assert_eq!(
+            restored.current_url(&page_id).unwrap().as_str(),
+            "https://example.com/one"
+        );
+        assert!(restored.can_go_forward(&page_id));
+    }
+
+    #[test]
+    fn automatic_hibernation_rejects_dirty_forms() {
+        let mut session = Session::default();
+        let page_id = PageId::new();
+        let _ = session.handle(BrowserCommand::Navigate {
+            page_id: page_id.clone(),
+            url: parse_url("https://example.com/form"),
+        });
+        assert_eq!(
+            session.hibernation_snapshot(
+                &page_id,
+                "Form".to_owned(),
+                Viewport {
+                    width: 960.0,
+                    height: 640.0,
+                },
+                0.0,
+                true,
+                true,
+            ),
+            Err(HibernationError::DirtyForm)
+        );
+    }
+
+    #[test]
+    fn invalid_hibernation_only_rejects_that_snapshot() {
+        let page_id = PageId::new();
+        let snapshot = HibernationSnapshot {
+            version: HIBERNATION_SNAPSHOT_VERSION + 1,
+            page_id,
+            url: parse_url("https://example.com/"),
+            title: "Invalid".to_owned(),
+            history: vec![parse_url("https://example.com/")],
+            cursor: 0,
+            viewport: Viewport {
+                width: 960.0,
+                height: 640.0,
+            },
+            scroll_y: 0.0,
+            form_dirty: false,
+        };
+        let mut session = Session::default();
+        assert_eq!(
+            session.restore_hibernation(snapshot),
+            Err(HibernationError::UnsupportedVersion)
+        );
+        let healthy = PageId::new();
+        session.restore_page(healthy.clone(), parse_url("https://healthy.example/"));
+        assert_eq!(
+            session.current_url(&healthy).unwrap().as_str(),
+            "https://healthy.example/"
+        );
     }
 }
