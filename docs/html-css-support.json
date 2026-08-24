@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "release": "0.4.0",
+  "release": "0.6.0",
   "scope": "static_html_css",
   "statuses": ["supported", "partial", "unsupported"],
   "features": [
@@ -15,11 +15,15 @@
     {"id":"css.box_model","status":"supported","evidence":["arch_layout::tests::block_box_contains_nested_content_and_edges"]},
     {"id":"css.inline_text","status":"supported","evidence":["arch_layout::tests::inline_runs_share_lines_and_wrap_or_break"]},
     {"id":"css.flexbox.direction_wrap_alignment_gap","status":"supported","evidence":["arch_layout::tests::flex_row_distributes_gap_growth_and_justification","arch_layout::tests::flex_wraps_and_aligns_each_line","arch_layout::tests::flex_column_honors_reverse_gap_and_cross_axis_alignment","arch_browser::snapshot::tests::fixture_snapshots_match_references"]},
-    {"id":"css.flexbox.basis_order","status":"partial","evidence":["arch_style::tests::computes_flex_container_and_item_properties"]},
+    {"id":"css.flexbox.basis_order","status":"supported","evidence":["arch_style::tests::computes_flex_item_and_positioning_properties","arch_layout::tests::flex_order_and_basis_control_row_and_column_items","arch_browser::snapshot::tests::fixture_snapshots_match_references"]},
     {"id":"css.overflow_clip","status":"supported","evidence":["arch_browser::snapshot::tests::fixture_snapshots_match_references"]},
-    {"id":"css.positioning","status":"unsupported","evidence":[]},
+    {"id":"css.custom_properties.var","status":"supported","evidence":["arch_css::tests::resolves_nested_variables_fallbacks_and_cycles","arch_style::tests::resolves_inherited_custom_properties_and_fallbacks","arch_browser::snapshot::tests::fixture_snapshots_match_references"]},
+    {"id":"css.media_queries.width_ranges","status":"supported","evidence":["arch_css::tests::parses_width_media_queries_and_custom_properties","arch_style::tests::applies_media_rules_for_the_actual_viewport","arch_browser::snapshot::tests::fixture_snapshots_match_references"]},
+    {"id":"css.media_queries.other","status":"unsupported","evidence":[]},
+    {"id":"css.positioning.relative_absolute","status":"supported","evidence":["arch_style::tests::computes_flex_item_and_positioning_properties","arch_layout::tests::relative_and_absolute_positioning_preserve_normal_flow","arch_browser::snapshot::tests::fixture_snapshots_match_references"]},
+    {"id":"css.positioning.fixed_sticky","status":"unsupported","evidence":[]},
+    {"id":"css.z_index.basic","status":"supported","evidence":["arch_paint::tests::orders_boxes_by_z_index_then_document_order","arch_browser::snapshot::tests::fixture_snapshots_match_references"]},
     {"id":"css.grid","status":"unsupported","evidence":[]},
-    {"id":"css.media_queries","status":"unsupported","evidence":[]},
     {"id":"css.animation","status":"unsupported","evidence":[]}
   ]
 }

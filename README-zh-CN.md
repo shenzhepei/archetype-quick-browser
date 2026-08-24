@@ -38,6 +38,7 @@ _来自仓库内 V3 固定测试语料的 Archetype 确定性渲染预览。_
 - 由 Browser broker 管理的 GET/POST 会话、加密持久 Cookie 和基础交互表单。
 - 带有界 IPC、崩溃恢复、macOS 沙箱探针和纯元数据标签休眠的 Renderer Runtime。
 - Flexbox 方向、换行、对齐、增长、收缩和间距。
+- V6 自定义属性、宽度媒体查询、Flex item basis/order、relative/absolute 定位和基础 z-index。
 - `archetype-sdk 0.1` Engine/Page API、Runtime 生命周期、结构化事件、完整性校验和 RGBA8 帧。
 
 ## 运行
@@ -106,8 +107,11 @@ mkdir -p coverage
 cargo llvm-cov --workspace --lcov --output-path coverage/lcov.info
 ```
 
-`V4 Acceptance` 工作流会运行 50 页版本的一分钟趋势探针，并同时执行 Runtime 恢复、沙箱、
+`V4 Acceptance` 工作流现在会运行当前 62 页版本的一分钟趋势探针，并同时执行 Runtime 恢复、沙箱、
 entitlement、支持矩阵和工作区质量闸门。
+
+`V6 Acceptance` 工作流将确定性语料扩展到 62 页，并验证多视口响应式样式、定位、
+Runtime/SDK 链路以及同一套一分钟 CPU/RSS 趋势闸门。
 
 运行 V5 UI 框架无关的合作方示例：
 
@@ -146,6 +150,9 @@ cargo run -p archetype-sdk --example partner_render -- \
 - [`docs/prd/06-Archetype-V5-Rust-SDK预览-PRD.md`](docs/prd/06-Archetype-V5-Rust-SDK预览-PRD.md)、
   对应的[详细设计](docs/detailed-design/06-Archetype-V5-Rust-SDK预览详设.md)、
   [验收证据](docs/v5-acceptance.md)和[兼容矩阵](docs/sdk-compatibility.json)
+- [`docs/prd/07-Archetype-V6-静态响应式CSS-PRD.md`](docs/prd/07-Archetype-V6-静态响应式CSS-PRD.md)、
+  对应的[详细设计](docs/detailed-design/07-Archetype-V6-静态响应式CSS详设.md)和
+  [验收证据](docs/v6-acceptance.md)，以及[机器可读资源报告](docs/v6-acceptance-report.json)
 
 ## V3 状态
 
@@ -181,6 +188,15 @@ cargo run -p archetype-sdk --example partner_render -- \
   SHA-256、优雅关闭、断连事件、事件压力和 100 次终止/重启/再渲染。
 - V5 仍是 Apple Silicon macOS 开发者预览。SDK 1.0、JavaScript、Runtime 自主管理网络、生产
   签名、公证、Windows、Linux、共享内存帧和 GPU 句柄均未实现。
+
+## V6 状态
+
+- V6 已完成：继承的自定义属性和有界 `var()` fallback 展开、`screen`/`all` 的 min/max-width
+  媒体查询、Flex `basis`/`order`、relative/absolute 定位、百分比偏移和稳定的基础 z-index 绘制。
+- 确定性语料现有 62 页。Browser、Runtime 和 SDK 使用调用方实际视口宽度；Protocol v4.1
+  还传递视口高度，用于定位元素的初始包含块。
+- Grid、fixed/sticky 定位、通用媒体查询、transition、animation 和 GPU 合成仍不支持，
+  并在机器可读支持矩阵中单独标记。
 
 ## 许可证
 

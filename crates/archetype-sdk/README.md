@@ -14,6 +14,6 @@ navigation.frame().save_png("frame.png")?;
 engine.shutdown().await?;
 ```
 
-The SDK requires Rust 1.85 or newer and currently supports Protocol v4 with Runtime `0.5.x` on
+The SDK requires Rust 1.85 or newer and currently supports Protocol v4.1 with Runtime `0.6.x` on
 macOS. This is an unsigned static-rendering developer preview, not an SDK 1.0 compatibility or
 production sandbox/signing commitment.

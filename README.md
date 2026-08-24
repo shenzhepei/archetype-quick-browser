@@ -38,6 +38,7 @@ _Deterministic Archetype rendering preview from the checked-in V3 fixture corpus
 - Browser-brokered GET/POST sessions with encrypted persistent Cookies and basic interactive forms.
 - A supervised Renderer Runtime with bounded IPC, crash recovery, macOS sandbox probes, and metadata-only tab hibernation.
 - Flexbox direction, wrapping, alignment, growth, shrinkage, and gaps.
+- V6 custom properties, width media queries, Flex item basis/order, relative/absolute positioning, and basic z-index.
 - `archetype-sdk 0.1` Engine/Page APIs, Runtime lifecycle, structured events, integrity checks, and RGBA8 frames.
 
 ## Run
@@ -110,8 +111,12 @@ mkdir -p coverage
 cargo llvm-cov --workspace --lcov --output-path coverage/lcov.info
 ```
 
-The `V4 Acceptance` workflow runs the 50-page variant of the one-minute trend probe together with
+The `V4 Acceptance` workflow now runs the current 62-page variant of the one-minute trend probe together with
 the Runtime recovery, sandbox, entitlement, support-matrix, and workspace quality gates.
+
+The `V6 Acceptance` workflow extends the deterministic corpus to 62 pages and verifies responsive
+style selection at multiple viewport widths, positioning, the Runtime/SDK path, and the same
+one-minute CPU/RSS trend gate.
 
 To run the V5 UI-neutral partner example:
 
@@ -150,6 +155,10 @@ The scoped product requirements and detailed implementation plans are in:
 - [`docs/prd/06-Archetype-V5-Rust-SDK预览-PRD.md`](docs/prd/06-Archetype-V5-Rust-SDK预览-PRD.md),
   its [detailed design](docs/detailed-design/06-Archetype-V5-Rust-SDK预览详设.md),
   [acceptance evidence](docs/v5-acceptance.md), and [compatibility matrix](docs/sdk-compatibility.json)
+- [`docs/prd/07-Archetype-V6-静态响应式CSS-PRD.md`](docs/prd/07-Archetype-V6-静态响应式CSS-PRD.md),
+  its [detailed design](docs/detailed-design/07-Archetype-V6-静态响应式CSS详设.md), and
+  [acceptance evidence](docs/v6-acceptance.md) with a
+  [machine-readable resource report](docs/v6-acceptance-report.json)
 
 ## V3 Status
 
@@ -194,6 +203,16 @@ The scoped product requirements and detailed implementation plans are in:
   and 100 terminate/restart/render cycles.
 - V5 remains an Apple Silicon macOS developer preview. SDK 1.0, JavaScript, Runtime-owned network,
   production signing, notarization, Windows, Linux, shared-memory frames, and GPU handles are not implemented.
+
+## V6 Status
+
+- V6 is complete: inherited custom properties with bounded `var()` fallback resolution, `screen`/`all`
+  min/max-width media queries, Flex `basis`/`order`, relative/absolute positioning, percentage
+  offsets, and stable basic z-index painting.
+- The deterministic corpus contains 62 pages. Browser, Runtime, and SDK use the caller's actual
+  viewport width; Protocol v4.1 also carries viewport height for positioned initial containing blocks.
+- Grid, fixed/sticky positioning, general media queries, transitions, animation and GPU compositing
+  remain unsupported and are reported separately in the machine-readable support matrix.
 
 ## License
 

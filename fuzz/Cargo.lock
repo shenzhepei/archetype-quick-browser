@@ -10,7 +10,7 @@ checksum = "c3d036a3c4ab069c7b410a2ce876bd74808d2d0888a82667669f8e783a898bf1"
 
 [[package]]
 name = "arch-css"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "cssparser",
  "serde",
@@ -18,14 +18,14 @@ dependencies = [
 
 [[package]]
 name = "arch-dom"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "serde",
 ]
 
 [[package]]
 name = "arch-html"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "arch-dom",
  "html5ever",
@@ -34,7 +34,7 @@ dependencies = [
 
 [[package]]
 name = "arch-layout"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "arch-dom",
  "arch-style",
@@ -43,7 +43,7 @@ dependencies = [
 
 [[package]]
 name = "arch-paint"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "arch-layout",
  "arch-style",
@@ -52,7 +52,7 @@ dependencies = [
 
 [[package]]
 name = "arch-style"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "arch-css",
  "arch-dom",
@@ -71,7 +71,7 @@ dependencies = [
 
 [[package]]
 name = "archetype-protocol"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "arch-paint",
  "archetype-types",
@@ -83,7 +83,7 @@ dependencies = [
 
 [[package]]
 name = "archetype-types"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "serde",
  "url",

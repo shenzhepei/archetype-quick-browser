@@ -1,0 +1,57 @@
+{
+  "schema_version": 2,
+  "generated_at_utc": "2026-08-24T12:48:56Z",
+  "git_commit": "3920d36aebe2030a3439e84e928bae0357e930a0",
+  "machine": {
+    "operating_system": "macOS 26.3",
+    "architecture": "aarch64",
+    "model": "Mac16,3",
+    "processor": "Apple M4",
+    "memory_bytes": 17179869184
+  },
+  "fixture_count": 62,
+  "completed_cycles": 60,
+  "completed_page_loads": 3720,
+  "requested_duration_seconds": 60,
+  "cycle_delay_milliseconds": 1000,
+  "measured_duration_seconds": 60.035166375,
+  "startup_to_window_ms": {
+    "samples": 20,
+    "minimum": 125.33208400000001,
+    "median": 137.09520799999999,
+    "p95": 1643.058041,
+    "maximum": 1643.058041,
+    "mean": 216.26211229999998
+  },
+  "page_pipeline_ms": {
+    "samples": 3720,
+    "minimum": 0.027916,
+    "median": 0.063292,
+    "p95": 0.219042,
+    "maximum": 1.438459,
+    "mean": 0.08859110053763447
+  },
+  "reference_frame_raster_ms": {
+    "samples": 3720,
+    "minimum": 0.096625,
+    "median": 0.250958,
+    "p95": 0.807917,
+    "maximum": 2.437,
+    "mean": 0.3476204672043005
+  },
+  "process_cpu_seconds": 1.66,
+  "average_cpu_percent": 2.7650460558917707,
+  "first_half_cpu_seconds_per_page": 0.0004354838709677419,
+  "second_half_cpu_seconds_per_page": 0.00045698924731182796,
+  "cpu_cost_growth_ratio": 1.0493827160493827,
+  "initial_rss_bytes": 31703040,
+  "final_rss_bytes": 23330816,
+  "rss_growth_bytes": -8372224,
+  "peak_rss_bytes": 31703040,
+  "acceptance": {
+    "startup_p95_under_two_seconds": "pass",
+    "all_fixtures_completed": "pass",
+    "one_minute_stability_completed": "pass",
+    "resource_growth_within_limits": "pass"
+  }
+}
