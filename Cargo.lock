@@ -223,6 +223,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "archetype-runtime"
+version = "0.3.0"
+dependencies = [
+ "arch-css",
+ "arch-dom",
+ "arch-html",
+ "arch-layout",
+ "arch-paint",
+ "arch-style",
+ "archetype-protocol",
+ "archetype-types",
+ "thiserror 2.0.20",
+]
+
+[[package]]
 name = "archetype-types"
 version = "0.3.0"
 dependencies = [

@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
   "crates/archetype-protocol",
+  "crates/archetype-runtime",
   "crates/archetype-types",
   "crates/arch-browser",
   "crates/arch-css",

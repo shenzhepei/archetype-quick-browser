@@ -1,0 +1,22 @@
+[package]
+name = "archetype-runtime"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+archetype-protocol = { path = "../archetype-protocol" }
+arch-css = { path = "../arch-css" }
+arch-dom = { path = "../arch-dom" }
+arch-html = { path = "../arch-html" }
+arch-layout = { path = "../arch-layout" }
+arch-paint = { path = "../arch-paint" }
+arch-style = { path = "../arch-style" }
+thiserror.workspace = true
+
+[dev-dependencies]
+archetype-types = { path = "../archetype-types" }
+
+[lints]
+workspace = true
