@@ -11,6 +11,7 @@ use arch_browser::{
 };
 use arch_net::{LoadError, LoadErrorKind, Loader};
 use arch_paint::{DisplayCommand, PaintColor};
+use arch_session::forms::{ControlId, ControlKind};
 use arch_store::{Bookmark, BookmarkKind, Page, Space};
 use arch_style::{FontStyle as PageFontStyle, FontWeight as PageFontWeight, TextAlign};
 use gpui::{
@@ -23,9 +24,11 @@ use gpui_component::{
     ActiveTheme as _, Disableable as _, Icon, IconName, IconNamed, Root, Sizable as _,
     StyledExt as _, TitleBar,
     button::{Button, ButtonVariants as _},
+    checkbox::Checkbox,
     h_flex,
     input::{Input, InputEvent, InputState},
     menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenu, PopupMenuItem},
+    radio::Radio,
     v_flex,
 };
 use url::Url;
@@ -228,6 +231,8 @@ struct QuickBrowser {
     selected_space: Option<String>,
     selected_page: Option<String>,
     rendered_pages: HashMap<String, RenderedPage>,
+    form_inputs: HashMap<FormControlKey, Entity<InputState>>,
+    form_subscriptions: HashMap<String, Vec<Subscription>>,
     error: Option<ErrorView>,
     loading_pages: HashSet<String>,
     navigation_tasks: HashMap<String, Task<()>>,
@@ -240,6 +245,13 @@ struct QuickBrowser {
     bookmark_folder_parent: Option<String>,
     renaming_bookmark: Option<String>,
     subscriptions: Vec<Subscription>,
+}
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+struct FormControlKey {
+    page_id: String,
+    form_index: usize,
+    control_id: ControlId,
 }
 
 impl QuickBrowser {
@@ -318,6 +330,8 @@ impl QuickBrowser {
             selected_space,
             selected_page,
             rendered_pages: HashMap::new(),
+            form_inputs: HashMap::new(),
+            form_subscriptions: HashMap::new(),
             error: None,
             loading_pages: HashSet::new(),
             navigation_tasks: HashMap::new(),
@@ -520,6 +534,8 @@ impl QuickBrowser {
         self.navigation_tasks.remove(id);
         self.loading_pages.remove(id);
         self.rendered_pages.remove(id);
+        self.form_inputs.retain(|key, _| key.page_id != id);
+        self.form_subscriptions.remove(id);
         self.pages.retain(|item| item.id != id);
         if closing_selected {
             self.selected_page = adjacent_page;
@@ -728,8 +744,127 @@ impl QuickBrowser {
             current.url = rendered.final_url.to_string();
             current.title.clone_from(&rendered.title);
         }
+        self.prepare_form_inputs(&page.id, &rendered, window, cx);
         self.rendered_pages.insert(page.id.clone(), rendered);
         cx.notify();
+    }
+
+    fn prepare_form_inputs(
+        &mut self,
+        page_id: &str,
+        rendered: &RenderedPage,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.form_inputs.retain(|key, _| key.page_id != page_id);
+        self.form_subscriptions.remove(page_id);
+        let mut subscriptions = Vec::new();
+        for (form_index, form) in rendered.forms.iter().enumerate() {
+            for control in &form.controls {
+                if !matches!(control.kind, ControlKind::Text | ControlKind::Password) {
+                    continue;
+                }
+                let key = FormControlKey {
+                    page_id: page_id.to_owned(),
+                    form_index,
+                    control_id: control.id,
+                };
+                let masked = control.kind == ControlKind::Password;
+                let input = cx.new(|cx| InputState::new(window, cx).masked(masked));
+                input.update(cx, |input, cx| {
+                    input.set_value(control.value.clone(), window, cx);
+                });
+                let event_key = key.clone();
+                subscriptions.push(cx.subscribe_in(
+                    &input,
+                    window,
+                    move |this, input, event, _window, cx| {
+                        if matches!(event, InputEvent::Change) {
+                            let value = input.read(cx).value().to_string();
+                            this.update_form_text(&event_key, value, cx);
+                        }
+                    },
+                ));
+                self.form_inputs.insert(key, input);
+            }
+        }
+        self.form_subscriptions
+            .insert(page_id.to_owned(), subscriptions);
+    }
+
+    fn update_form_text(&mut self, key: &FormControlKey, value: String, cx: &mut Context<Self>) {
+        if let Some(form) = self
+            .rendered_pages
+            .get_mut(&key.page_id)
+            .and_then(|rendered| rendered.forms.get_mut(key.form_index))
+        {
+            let _ = form.set_text(key.control_id, value);
+            cx.notify();
+        }
+    }
+
+    fn update_form_checked(&mut self, key: &FormControlKey, checked: bool, cx: &mut Context<Self>) {
+        if let Some(form) = self
+            .rendered_pages
+            .get_mut(&key.page_id)
+            .and_then(|rendered| rendered.forms.get_mut(key.form_index))
+        {
+            let _ = form.set_checked(key.control_id, checked);
+            cx.notify();
+        }
+    }
+
+    fn update_form_select(
+        &mut self,
+        key: &FormControlKey,
+        option_index: usize,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(form) = self
+            .rendered_pages
+            .get_mut(&key.page_id)
+            .and_then(|rendered| rendered.forms.get_mut(key.form_index))
+        {
+            let _ = form.select(key.control_id, option_index);
+            cx.notify();
+        }
+    }
+
+    fn submit_page_form(
+        &mut self,
+        key: &FormControlKey,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.error = None;
+        let Some(page) = self
+            .pages
+            .iter()
+            .find(|page| page.id == key.page_id)
+            .cloned()
+        else {
+            return;
+        };
+        let submission = self
+            .rendered_pages
+            .get(&key.page_id)
+            .and_then(|rendered| rendered.forms.get(key.form_index))
+            .and_then(|form| form.submission(Some(key.control_id)).ok());
+        let Some(submission) = submission else {
+            return;
+        };
+        match self.core.submit_form(&page, &submission, 960.0) {
+            Ok(rendered) => self.apply_rendered(&page, rendered, window, cx),
+            Err(error) => {
+                logging::navigation_failed(
+                    &page.id,
+                    submission.target.as_str(),
+                    &format!("{error:#}"),
+                );
+                self.error = Some(ErrorView::navigation(self.language, &error));
+                cx.notify();
+            }
+        }
     }
 
     fn selected_page_record(&self) -> Option<&Page> {
@@ -1400,13 +1535,24 @@ impl QuickBrowser {
                 .into_any_element();
         };
 
-        let mut layers = Vec::with_capacity(rendered.display_list.commands.len());
+        let mut layers =
+            Vec::with_capacity(rendered.display_list.commands.len() + rendered.form_controls.len());
         for command in &rendered.display_list.commands {
             layers.push(Self::display_command(
                 command,
                 &rendered.image_resources,
                 cx,
             ));
+        }
+        let page_id = self
+            .selected_page
+            .as_ref()
+            .expect("rendered page has a selected page")
+            .clone();
+        for positioned in &rendered.form_controls {
+            if let Some(control) = self.form_control(&page_id, *positioned, cx) {
+                layers.push(control);
+            }
         }
         let canvas = div()
             .relative()
@@ -1532,6 +1678,120 @@ impl QuickBrowser {
         };
         clipped_element(element, clip)
     }
+
+    fn form_control(
+        &self,
+        page_id: &str,
+        positioned: arch_browser::PositionedFormControl,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let key = FormControlKey {
+            page_id: page_id.to_owned(),
+            form_index: positioned.form_index,
+            control_id: positioned.control_id,
+        };
+        let control = self
+            .rendered_pages
+            .get(page_id)?
+            .forms
+            .get(positioned.form_index)?
+            .controls
+            .iter()
+            .find(|control| control.id == positioned.control_id)?
+            .clone();
+        let element = match control.kind {
+            ControlKind::Text | ControlKind::Password => {
+                let input = self.form_inputs.get(&key)?;
+                Input::new(input).small().into_any_element()
+            }
+            ControlKind::Checkbox => {
+                let browser = cx.entity();
+                let event_key = key.clone();
+                Checkbox::new(SharedString::from(form_control_element_id(&key)))
+                    .checked(control.checked)
+                    .on_click(move |checked, _, cx| {
+                        browser.update(cx, |this, cx| {
+                            this.update_form_checked(&event_key, *checked, cx);
+                        });
+                    })
+                    .into_any_element()
+            }
+            ControlKind::Radio => {
+                let browser = cx.entity();
+                let event_key = key.clone();
+                Radio::new(SharedString::from(form_control_element_id(&key)))
+                    .checked(control.checked)
+                    .on_click(move |_, _, cx| {
+                        browser.update(cx, |this, cx| {
+                            this.update_form_checked(&event_key, true, cx);
+                        });
+                    })
+                    .into_any_element()
+            }
+            ControlKind::Select => {
+                let browser = cx.entity();
+                let selected_index = control.selected_index;
+                let label = selected_index
+                    .and_then(|index| control.options.get(index))
+                    .map_or_else(String::new, |option| option.label.clone());
+                let options = control.options.clone();
+                let event_key = key.clone();
+                Button::new(SharedString::from(form_control_element_id(&key)))
+                    .small()
+                    .label(label)
+                    .dropdown_caret(true)
+                    .dropdown_menu(move |mut menu, _, _| {
+                        for (option_index, option) in options.iter().enumerate() {
+                            let browser = browser.clone();
+                            let event_key = event_key.clone();
+                            menu = menu.item(
+                                PopupMenuItem::new(option.label.clone())
+                                    .checked(selected_index == Some(option_index))
+                                    .on_click(move |_, _, cx| {
+                                        browser.update(cx, |this, cx| {
+                                            this.update_form_select(&event_key, option_index, cx);
+                                        });
+                                    }),
+                            );
+                        }
+                        menu
+                    })
+                    .into_any_element()
+            }
+            ControlKind::Submit => {
+                let event_key = key.clone();
+                Button::new(SharedString::from(form_control_element_id(&key)))
+                    .small()
+                    .label(control.value)
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        this.submit_page_form(&event_key, window, cx);
+                    }))
+                    .into_any_element()
+            }
+            ControlKind::Button => Button::new(SharedString::from(form_control_element_id(&key)))
+                .small()
+                .label(control.value)
+                .into_any_element(),
+        };
+        let (x, y) = relative_position(positioned.bounds, positioned.clip);
+        let positioned_element = div()
+            .absolute()
+            .left(px(x))
+            .top(px(y))
+            .w(px(positioned.bounds.width))
+            .h(px(positioned.bounds.height))
+            .overflow_hidden()
+            .child(element)
+            .into_any_element();
+        Some(clipped_element(positioned_element, positioned.clip))
+    }
+}
+
+fn form_control_element_id(key: &FormControlKey) -> String {
+    format!(
+        "form-control-{}-{}-{}",
+        key.page_id, key.form_index, key.control_id.0
+    )
 }
 
 #[allow(clippy::too_many_arguments)]
