@@ -267,6 +267,15 @@ fn supported_property(name: &str) -> bool {
             | "max-width"
             | "box-sizing"
             | "overflow"
+            | "flex-direction"
+            | "flex-wrap"
+            | "justify-content"
+            | "align-items"
+            | "gap"
+            | "row-gap"
+            | "column-gap"
+            | "flex-grow"
+            | "flex-shrink"
     )
 }
 

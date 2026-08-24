@@ -12,7 +12,44 @@ pub enum Display {
     #[default]
     Inline,
     Block,
+    Flex,
     None,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub enum FlexDirection {
+    #[default]
+    Row,
+    RowReverse,
+    Column,
+    ColumnReverse,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub enum FlexWrap {
+    #[default]
+    NoWrap,
+    Wrap,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub enum FlexJustify {
+    #[default]
+    Start,
+    Center,
+    End,
+    SpaceBetween,
+    SpaceAround,
+    SpaceEvenly,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub enum FlexAlign {
+    Start,
+    Center,
+    End,
+    #[default]
+    Stretch,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -96,6 +133,14 @@ pub struct ComputedStyle {
     pub max_width: Option<ComputedLength>,
     pub box_sizing: BoxSizing,
     pub overflow: Overflow,
+    pub flex_direction: FlexDirection,
+    pub flex_wrap: FlexWrap,
+    pub justify_content: FlexJustify,
+    pub align_items: FlexAlign,
+    pub row_gap: f32,
+    pub column_gap: f32,
+    pub flex_grow: f32,
+    pub flex_shrink: f32,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -223,6 +268,7 @@ fn ua_style(kind: &NodeKind, inherited: Option<&ComputedStyle>) -> ComputedStyle
         font_weight,
         font_style,
         white_space,
+        flex_shrink: 1.0,
         ..ComputedStyle::default()
     };
     if let Some(parent) = inherited {
@@ -356,10 +402,17 @@ fn apply(style: &mut ComputedStyle, declarations: &BTreeMap<&str, CascadeWinner<
         ) {
             continue;
         }
+        if apply_flex_property(style, name, value) {
+            continue;
+        }
+        if apply_typography_property(style, name, value) {
+            continue;
+        }
         match *name {
             "display" => {
                 style.display = match *value {
                     "block" => Display::Block,
+                    "flex" => Display::Flex,
                     "none" => Display::None,
                     _ => Display::Inline,
                 };
@@ -404,38 +457,123 @@ fn apply(style: &mut ComputedStyle, declarations: &BTreeMap<&str, CascadeWinner<
                 "hidden" => style.overflow = Overflow::Hidden,
                 _ => {}
             },
-            "white-space" => {
-                style.white_space = match *value {
-                    "pre" => WhiteSpace::Pre,
-                    "pre-wrap" => WhiteSpace::PreWrap,
-                    "nowrap" => WhiteSpace::NoWrap,
-                    _ => WhiteSpace::Normal,
-                };
-            }
-            "font-weight" => {
-                style.font_weight = if matches!(*value, "bold" | "700" | "800" | "900") {
-                    FontWeight::Bold
-                } else {
-                    FontWeight::Normal
-                };
-            }
-            "font-style" => {
-                style.font_style = if matches!(*value, "italic" | "oblique") {
-                    FontStyle::Italic
-                } else {
-                    FontStyle::Normal
-                };
-            }
-            "text-align" => {
-                style.text_align = match *value {
-                    "center" => TextAlign::Center,
-                    "right" | "end" => TextAlign::End,
-                    _ => TextAlign::Start,
-                };
-            }
             _ => {}
         }
     }
+}
+
+fn apply_typography_property(style: &mut ComputedStyle, name: &str, value: &str) -> bool {
+    match name {
+        "white-space" => {
+            style.white_space = match value {
+                "pre" => WhiteSpace::Pre,
+                "pre-wrap" => WhiteSpace::PreWrap,
+                "nowrap" => WhiteSpace::NoWrap,
+                _ => WhiteSpace::Normal,
+            };
+        }
+        "font-weight" => {
+            style.font_weight = if matches!(value, "bold" | "700" | "800" | "900") {
+                FontWeight::Bold
+            } else {
+                FontWeight::Normal
+            };
+        }
+        "font-style" => {
+            style.font_style = if matches!(value, "italic" | "oblique") {
+                FontStyle::Italic
+            } else {
+                FontStyle::Normal
+            };
+        }
+        "text-align" => {
+            style.text_align = match value {
+                "center" => TextAlign::Center,
+                "right" | "end" => TextAlign::End,
+                _ => TextAlign::Start,
+            };
+        }
+        _ => return false,
+    }
+    true
+}
+
+fn apply_flex_property(style: &mut ComputedStyle, name: &str, value: &str) -> bool {
+    match name {
+        "flex-direction" => {
+            style.flex_direction = match value {
+                "row-reverse" => FlexDirection::RowReverse,
+                "column" => FlexDirection::Column,
+                "column-reverse" => FlexDirection::ColumnReverse,
+                _ => FlexDirection::Row,
+            };
+        }
+        "flex-wrap" => {
+            style.flex_wrap = if value == "wrap" {
+                FlexWrap::Wrap
+            } else {
+                FlexWrap::NoWrap
+            };
+        }
+        "justify-content" => {
+            style.justify_content = match value {
+                "center" => FlexJustify::Center,
+                "end" | "flex-end" => FlexJustify::End,
+                "space-between" => FlexJustify::SpaceBetween,
+                "space-around" => FlexJustify::SpaceAround,
+                "space-evenly" => FlexJustify::SpaceEvenly,
+                _ => FlexJustify::Start,
+            };
+        }
+        "align-items" => {
+            style.align_items = match value {
+                "start" | "flex-start" => FlexAlign::Start,
+                "center" => FlexAlign::Center,
+                "end" | "flex-end" => FlexAlign::End,
+                _ => FlexAlign::Stretch,
+            };
+        }
+        "gap" => {
+            if let Some((row, column)) = flex_gap(value, style.font_size_px) {
+                style.row_gap = row;
+                style.column_gap = column;
+            }
+        }
+        "row-gap" => set_nonnegative(&mut style.row_gap, value, style.font_size_px),
+        "column-gap" => set_nonnegative(&mut style.column_gap, value, style.font_size_px),
+        "flex-grow" => style.flex_grow = nonnegative_number(value).unwrap_or(style.flex_grow),
+        "flex-shrink" => {
+            style.flex_shrink = nonnegative_number(value).unwrap_or(style.flex_shrink);
+        }
+        _ => return false,
+    }
+    true
+}
+
+fn nonnegative_number(value: &str) -> Option<f32> {
+    value
+        .parse::<f32>()
+        .ok()
+        .filter(|value| value.is_finite() && *value >= 0.0)
+}
+
+fn set_nonnegative(target: &mut f32, value: &str, em_px: f32) {
+    if let Some(value) = absolute_length(value, em_px).filter(|value| *value >= 0.0) {
+        *target = value;
+    }
+}
+
+fn flex_gap(value: &str, em_px: f32) -> Option<(f32, f32)> {
+    let values: Vec<_> = value.split_whitespace().collect();
+    match values.as_slice() {
+        [both] => absolute_length(both, em_px).map(|value| (value, value)),
+        [row, column] => Some((
+            absolute_length(row, em_px)?,
+            absolute_length(column, em_px)?,
+        )),
+        _ => None,
+    }
+    .filter(|(row, column)| *row >= 0.0 && *column >= 0.0)
 }
 
 fn apply_border(style: &mut ComputedStyle, declarations: &BTreeMap<&str, CascadeWinner<'_>>) {
@@ -860,5 +998,39 @@ mod tests {
         assert_eq!(text_style("Bold").font_weight, FontWeight::Bold);
         assert_eq!(text_style("Italic").font_style, FontStyle::Italic);
         assert_eq!(text_style("preserved").white_space, WhiteSpace::Pre);
+    }
+
+    #[test]
+    fn computes_flex_container_and_item_properties() {
+        let document = parse_html("<main><div>Item</div></main>");
+        let styled = style_document(
+            &document,
+            &parse(
+                "main { display: flex; flex-direction: column-reverse; flex-wrap: wrap; \
+                 justify-content: space-evenly; align-items: center; gap: 12px 20px } \
+                 main div { flex-grow: 2; flex-shrink: 0.5 }",
+            ),
+        );
+        let style_for = |name: &str| {
+            let id = document
+                .descendants(document.root())
+                .find(
+                    |node| matches!(&node.kind, NodeKind::Element(element) if element.name == name),
+                )
+                .unwrap()
+                .id;
+            &styled.iter().find(|node| node.node_id == id).unwrap().style
+        };
+        let container = style_for("main");
+        assert_eq!(container.display, Display::Flex);
+        assert_eq!(container.flex_direction, FlexDirection::ColumnReverse);
+        assert_eq!(container.flex_wrap, FlexWrap::Wrap);
+        assert_eq!(container.justify_content, FlexJustify::SpaceEvenly);
+        assert_eq!(container.align_items, FlexAlign::Center);
+        assert!((container.row_gap - 12.0).abs() < f32::EPSILON);
+        assert!((container.column_gap - 20.0).abs() < f32::EPSILON);
+        let item = style_for("div");
+        assert!((item.flex_grow - 2.0).abs() < f32::EPSILON);
+        assert!((item.flex_shrink - 0.5).abs() < f32::EPSILON);
     }
 }
