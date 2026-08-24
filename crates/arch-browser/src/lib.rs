@@ -66,6 +66,20 @@ pub struct BrowserCore {
     loader: Loader,
 }
 
+#[derive(Clone, Debug)]
+pub struct PendingNavigation {
+    page_id: PageId,
+    navigation_id: arch_session::NavigationId,
+    url: Url,
+}
+
+impl PendingNavigation {
+    #[must_use]
+    pub fn url(&self) -> &Url {
+        &self.url
+    }
+}
+
 impl BrowserCore {
     /// Opens a persistent browser profile and restores its page identities.
     ///
@@ -221,16 +235,8 @@ impl BrowserCore {
         url: &Url,
         viewport_width: f32,
     ) -> Result<RenderedPage> {
-        let page_id =
-            PageId::from_uuid(Uuid::parse_str(&page.id).context("page has invalid UUID")?);
-        self.execute_navigation(
-            page,
-            BrowserCommand::Navigate {
-                page_id,
-                url: url.clone(),
-            },
-            viewport_width,
-        )
+        let pending = self.start_navigation(page, url)?;
+        self.execute_navigation(page, &pending, viewport_width)
     }
 
     /// Navigates to the previous in-memory history entry.
@@ -238,9 +244,8 @@ impl BrowserCore {
     /// # Errors
     /// Returns an error when there is no previous entry or loading/rendering fails.
     pub fn back(&mut self, page: &Page, viewport_width: f32) -> Result<RenderedPage> {
-        let page_id =
-            PageId::from_uuid(Uuid::parse_str(&page.id).context("page has invalid UUID")?);
-        self.execute_navigation(page, BrowserCommand::Back { page_id }, viewport_width)
+        let pending = self.start_back(page)?;
+        self.execute_navigation(page, &pending, viewport_width)
     }
 
     /// Navigates to the next in-memory history entry.
@@ -248,9 +253,8 @@ impl BrowserCore {
     /// # Errors
     /// Returns an error when there is no next entry or loading/rendering fails.
     pub fn forward(&mut self, page: &Page, viewport_width: f32) -> Result<RenderedPage> {
-        let page_id =
-            PageId::from_uuid(Uuid::parse_str(&page.id).context("page has invalid UUID")?);
-        self.execute_navigation(page, BrowserCommand::Forward { page_id }, viewport_width)
+        let pending = self.start_forward(page)?;
+        self.execute_navigation(page, &pending, viewport_width)
     }
 
     /// Reloads the current in-memory history entry.
@@ -258,9 +262,92 @@ impl BrowserCore {
     /// # Errors
     /// Returns an error when there is no current entry or loading/rendering fails.
     pub fn reload(&mut self, page: &Page, viewport_width: f32) -> Result<RenderedPage> {
-        let page_id =
-            PageId::from_uuid(Uuid::parse_str(&page.id).context("page has invalid UUID")?);
-        self.execute_navigation(page, BrowserCommand::Reload { page_id }, viewport_width)
+        let pending = self.start_reload(page)?;
+        self.execute_navigation(page, &pending, viewport_width)
+    }
+
+    /// Starts a navigation without blocking the caller on loading and rendering.
+    ///
+    /// # Errors
+    /// Returns an error when the page ID is invalid.
+    pub fn start_navigation(&mut self, page: &Page, url: &Url) -> Result<PendingNavigation> {
+        let page_id = parsed_page_id(page).context("page has invalid UUID")?;
+        self.start_command(BrowserCommand::Navigate {
+            page_id,
+            url: url.clone(),
+        })
+    }
+
+    /// Starts a history-back navigation without blocking the caller.
+    ///
+    /// # Errors
+    /// Returns an error when the page ID is invalid or no previous history entry exists.
+    pub fn start_back(&mut self, page: &Page) -> Result<PendingNavigation> {
+        let page_id = parsed_page_id(page).context("page has invalid UUID")?;
+        self.start_command(BrowserCommand::Back { page_id })
+    }
+
+    /// Starts a history-forward navigation without blocking the caller.
+    ///
+    /// # Errors
+    /// Returns an error when the page ID is invalid or no next history entry exists.
+    pub fn start_forward(&mut self, page: &Page) -> Result<PendingNavigation> {
+        let page_id = parsed_page_id(page).context("page has invalid UUID")?;
+        self.start_command(BrowserCommand::Forward { page_id })
+    }
+
+    /// Starts a reload without blocking the caller.
+    ///
+    /// # Errors
+    /// Returns an error when the page ID is invalid or has no current URL.
+    pub fn start_reload(&mut self, page: &Page) -> Result<PendingNavigation> {
+        let page_id = parsed_page_id(page).context("page has invalid UUID")?;
+        self.start_command(BrowserCommand::Reload { page_id })
+    }
+
+    /// Commits a background navigation only when it is still the page's newest request.
+    ///
+    /// # Errors
+    /// Returns an error when persisting the final URL and title fails.
+    pub fn finish_navigation(
+        &mut self,
+        page: &Page,
+        pending: &PendingNavigation,
+        rendered: &RenderedPage,
+    ) -> Result<bool> {
+        if !self.session.commit_final_url(
+            pending.page_id,
+            pending.navigation_id,
+            rendered.final_url.clone(),
+        ) {
+            return Ok(false);
+        }
+        self.store.update_page_navigation(
+            &page.id,
+            rendered.final_url.as_str(),
+            &rendered.title,
+        )?;
+        Ok(true)
+    }
+
+    /// Invalidates the active navigation for a page.
+    ///
+    /// # Errors
+    /// Returns an error when the page ID is invalid.
+    pub fn stop(&mut self, page: &Page) -> Result<bool> {
+        let page_id = parsed_page_id(page).context("page has invalid UUID")?;
+        Ok(matches!(
+            self.session.handle(BrowserCommand::Stop { page_id }),
+            BrowserEvent::LoadStageChanged {
+                stage: arch_session::LoadStage::Cancelled,
+                ..
+            }
+        ))
+    }
+
+    #[must_use]
+    pub fn accepts_navigation(&self, pending: &PendingNavigation) -> bool {
+        self.session.accepts(pending.page_id, pending.navigation_id)
     }
 
     /// Reports whether the page has an older in-memory history entry.
@@ -278,9 +365,17 @@ impl BrowserCore {
     fn execute_navigation(
         &mut self,
         page: &Page,
-        command: BrowserCommand,
+        pending: &PendingNavigation,
         viewport_width: f32,
     ) -> Result<RenderedPage> {
+        let rendered = render_url(&self.loader, &pending.url, viewport_width)?;
+        if !self.finish_navigation(page, pending, &rendered)? {
+            anyhow::bail!("navigation result became stale");
+        }
+        Ok(rendered)
+    }
+
+    fn start_command(&mut self, command: BrowserCommand) -> Result<PendingNavigation> {
         let event = self.session.handle(command);
         let BrowserEvent::NavigationStarted {
             page_id,
@@ -290,19 +385,11 @@ impl BrowserCore {
         else {
             anyhow::bail!("navigation command was ignored");
         };
-        let rendered = render_url(&self.loader, &url, viewport_width)?;
-        if !self
-            .session
-            .commit_final_url(page_id, navigation_id, rendered.final_url.clone())
-        {
-            anyhow::bail!("navigation result became stale");
-        }
-        self.store.update_page_navigation(
-            &page.id,
-            rendered.final_url.as_str(),
-            &rendered.title,
-        )?;
-        Ok(rendered)
+        Ok(PendingNavigation {
+            page_id,
+            navigation_id,
+            url,
+        })
     }
 
     /// Lists persisted global tabs.
@@ -1088,6 +1175,22 @@ mod tests {
             core.forward(&page, 1280.0).unwrap().title,
             "Cascade fixture"
         );
+    }
+
+    #[test]
+    fn stopped_navigation_cannot_commit_a_late_result() {
+        let mut core = BrowserCore::in_memory().unwrap();
+        let url = Url::parse("file:///cancelled.html").unwrap();
+        let page = core.create_page(&url).unwrap();
+        let pending = core.start_navigation(&page, &url).unwrap();
+        assert!(core.stop(&page).unwrap());
+        let rendered = render_html(
+            &url,
+            "<title>Late result</title><p>must not commit</p>",
+            1280.0,
+        );
+        assert!(!core.finish_navigation(&page, &pending, &rendered).unwrap());
+        assert!(core.pages().unwrap()[0].title.is_empty());
     }
 
     #[test]

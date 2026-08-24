@@ -135,6 +135,10 @@ impl Language {
         self.select("重新加载", "Reload")
     }
 
+    pub(crate) const fn stop_loading(self) -> &'static str {
+        self.select("停止加载", "Stop loading")
+    }
+
     pub(crate) const fn navigate(self) -> &'static str {
         self.select("前往", "Go")
     }

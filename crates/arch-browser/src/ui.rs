@@ -1,15 +1,22 @@
-use std::{borrow::Cow, path::PathBuf};
+use std::{
+    borrow::Cow,
+    collections::{HashMap, HashSet},
+    io::Write as _,
+    path::PathBuf,
+};
 
-use arch_browser::{BrowserCore, RenderError, RenderErrorKind, RenderedPage};
-use arch_net::{LoadError, LoadErrorKind};
+use arch_browser::{
+    BrowserCore, PendingNavigation, RenderError, RenderErrorKind, RenderedPage, render_url,
+};
+use arch_net::{LoadError, LoadErrorKind, Loader};
 use arch_paint::{DisplayCommand, PaintColor};
 use arch_store::{Bookmark, BookmarkKind, Page, Space};
 use arch_style::{FontStyle as PageFontStyle, FontWeight as PageFontWeight, TextAlign};
 use gpui::{
     AnyElement, AppContext as _, Application, AssetSource, Context, Entity, FontWeight,
     InteractiveElement as _, IntoElement, ParentElement, Render, SharedString,
-    StatefulInteractiveElement as _, Styled, Subscription, Window, WindowBounds, WindowOptions,
-    div, img, prelude::FluentBuilder as _, px, rgba, size,
+    StatefulInteractiveElement as _, Styled, Subscription, Task, Window, WindowBounds,
+    WindowOptions, div, img, prelude::FluentBuilder as _, px, rgba, size,
 };
 use gpui_component::{
     ActiveTheme as _, Disableable as _, Icon, IconName, IconNamed, Root, Sizable as _,
@@ -194,8 +201,15 @@ pub fn run() {
         cx.spawn(async move |cx| {
             cx.open_window(options, |window, cx| {
                 let browser = cx.new(|cx| QuickBrowser::new(window, cx));
+                browser.update(cx, |browser, cx| {
+                    browser.restore_selected_page(window, cx);
+                });
                 cx.new(|cx| Root::new(browser, window, cx))
             })?;
+            if std::env::var_os("ARCHETYPE_STARTUP_PROBE").is_some() {
+                println!("ARCHETYPE_READY");
+                std::io::stdout().flush()?;
+            }
             Ok::<_, anyhow::Error>(())
         })
         .detach();
@@ -210,8 +224,10 @@ struct QuickBrowser {
     pages: Vec<Page>,
     selected_space: Option<String>,
     selected_page: Option<String>,
-    rendered: Option<RenderedPage>,
+    rendered_pages: HashMap<String, RenderedPage>,
     error: Option<ErrorView>,
+    loading_pages: HashSet<String>,
+    navigation_tasks: HashMap<String, Task<()>>,
     address_input: Entity<InputState>,
     space_input: Entity<InputState>,
     folder_input: Entity<InputState>,
@@ -297,8 +313,10 @@ impl QuickBrowser {
             pages,
             selected_space,
             selected_page,
-            rendered: None,
+            rendered_pages: HashMap::new(),
             error: None,
+            loading_pages: HashSet::new(),
+            navigation_tasks: HashMap::new(),
             address_input,
             space_input,
             folder_input,
@@ -463,14 +481,21 @@ impl QuickBrowser {
     fn select_page(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
         self.error = None;
         self.selected_page = Some(id.to_owned());
-        let address = self
-            .selected_page_record()
+        let page = self.selected_page_record().cloned();
+        let address = page
+            .as_ref()
             .map(|page| page.url.clone())
             .unwrap_or_default();
-        self.rendered = None;
         self.set_address(address, window, cx);
         self.persist_selection();
-        cx.notify();
+        if let Some(page) = page
+            && !self.rendered_pages.contains_key(&page.id)
+            && !self.loading_pages.contains(&page.id)
+        {
+            self.reload_page(page, window, cx);
+        } else {
+            cx.notify();
+        }
     }
 
     fn close_page(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
@@ -485,15 +510,24 @@ impl QuickBrowser {
             cx.notify();
             return;
         }
+        self.navigation_tasks.remove(id);
+        self.loading_pages.remove(id);
+        self.rendered_pages.remove(id);
         self.pages.retain(|item| item.id != id);
         if closing_selected {
             self.selected_page = adjacent_page;
-            let address = self
-                .selected_page_record()
+            let next_page = self.selected_page_record().cloned();
+            let address = next_page
+                .as_ref()
                 .map(|page| page.url.clone())
                 .unwrap_or_default();
-            self.rendered = None;
             self.set_address(address, window, cx);
+            if let Some(page) = next_page
+                && !self.rendered_pages.contains_key(&page.id)
+                && !self.loading_pages.contains(&page.id)
+            {
+                self.reload_page(page, window, cx);
+            }
         }
         self.persist_selection();
         cx.notify();
@@ -530,9 +564,8 @@ impl QuickBrowser {
             .selected_page_record()
             .cloned()
             .expect("page was created");
-        logging::navigation_started(&page.id, url.as_str());
-        match self.core.navigate(&page, url, 960.0) {
-            Ok(rendered) => self.apply_rendered(&page, rendered, window, cx),
+        match self.core.start_navigation(&page, url) {
+            Ok(pending) => self.start_render(page, pending, window, cx),
             Err(error) => {
                 logging::navigation_failed(&page.id, url.as_str(), &format!("{error:#}"));
                 self.error = Some(ErrorView::navigation(self.language, &error));
@@ -552,12 +585,12 @@ impl QuickBrowser {
             return;
         };
         let result = match direction {
-            HistoryDirection::Back => self.core.back(&page, 960.0),
-            HistoryDirection::Forward => self.core.forward(&page, 960.0),
-            HistoryDirection::Reload => self.core.reload(&page, 960.0),
+            HistoryDirection::Back => self.core.start_back(&page),
+            HistoryDirection::Forward => self.core.start_forward(&page),
+            HistoryDirection::Reload => self.core.start_reload(&page),
         };
         match result {
-            Ok(rendered) => self.apply_rendered(&page, rendered, window, cx),
+            Ok(pending) => self.start_render(page, pending, window, cx),
             Err(error) => {
                 logging::history_navigation_failed(
                     &page.id,
@@ -568,6 +601,98 @@ impl QuickBrowser {
                 cx.notify();
             }
         }
+    }
+
+    fn restore_selected_page(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(page) = self.selected_page_record().cloned() {
+            self.reload_page(page, window, cx);
+        }
+    }
+
+    fn reload_page(&mut self, page: Page, window: &mut Window, cx: &mut Context<Self>) {
+        match self.core.start_reload(&page) {
+            Ok(pending) => self.start_render(page, pending, window, cx),
+            Err(error) => {
+                self.error = Some(ErrorView::navigation(self.language, &error));
+                cx.notify();
+            }
+        }
+    }
+
+    fn start_render(
+        &mut self,
+        page: Page,
+        pending: PendingNavigation,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let page_id = page.id.clone();
+        let url = pending.url().clone();
+        logging::navigation_started(&page_id, url.as_str());
+        self.loading_pages.insert(page_id.clone());
+        let browser = cx.entity();
+        let task = window.spawn(cx, async move |cx| {
+            let result = cx
+                .background_spawn(async move {
+                    let loader = Loader::new()?;
+                    render_url(&loader, &url, 960.0)
+                })
+                .await;
+            let _ = cx.update(|window, cx| {
+                browser.update(cx, |browser, cx| {
+                    browser.finish_render(&page, &pending, result, window, cx);
+                });
+            });
+        });
+        self.navigation_tasks.insert(page_id, task);
+        cx.notify();
+    }
+
+    fn finish_render(
+        &mut self,
+        page: &Page,
+        pending: &PendingNavigation,
+        result: anyhow::Result<RenderedPage>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.navigation_tasks.remove(&page.id);
+        self.loading_pages.remove(&page.id);
+        if !self.core.accepts_navigation(pending) {
+            cx.notify();
+            return;
+        }
+        match result {
+            Ok(rendered) => match self.core.finish_navigation(page, pending, &rendered) {
+                Ok(true) => self.apply_rendered(page, rendered, window, cx),
+                Ok(false) => cx.notify(),
+                Err(error) => {
+                    self.error = Some(ErrorView::application(self.language, &error));
+                    cx.notify();
+                }
+            },
+            Err(error) => {
+                logging::navigation_failed(&page.id, pending.url().as_str(), &format!("{error:#}"));
+                if self.selected_page.as_deref() == Some(page.id.as_str()) {
+                    self.error = Some(ErrorView::navigation(self.language, &error));
+                }
+                cx.notify();
+            }
+        }
+    }
+
+    fn stop_loading(&mut self, cx: &mut Context<Self>) {
+        let Some(page) = self.selected_page_record().cloned() else {
+            return;
+        };
+        if !self.loading_pages.remove(&page.id) {
+            return;
+        }
+        self.navigation_tasks.remove(&page.id);
+        if let Err(error) = self.core.stop(&page) {
+            self.error = Some(ErrorView::application(self.language, &error));
+        }
+        cx.notify();
     }
 
     fn apply_rendered(
@@ -587,12 +712,14 @@ impl QuickBrowser {
         for diagnostic in &rendered.diagnostics {
             logging::render_diagnostic(Some(&page.id), diagnostic);
         }
-        self.set_address(rendered.final_url.to_string(), window, cx);
+        if self.selected_page.as_deref() == Some(page.id.as_str()) {
+            self.set_address(rendered.final_url.to_string(), window, cx);
+        }
         if let Some(current) = self.pages.iter_mut().find(|item| item.id == page.id) {
             current.url = rendered.final_url.to_string();
             current.title.clone_from(&rendered.title);
         }
-        self.rendered = Some(rendered);
+        self.rendered_pages.insert(page.id.clone(), rendered);
         cx.notify();
     }
 
@@ -1119,6 +1246,7 @@ impl QuickBrowser {
 
     fn toolbar(&self, cx: &mut Context<Self>) -> AnyElement {
         let current = self.selected_page_record();
+        let loading = current.is_some_and(|page| self.loading_pages.contains(&page.id));
         let can_back = current.is_some_and(|page| self.core.can_go_back(page));
         let can_forward = current.is_some_and(|page| self.core.can_go_forward(page));
         let bookmark_folders = self
@@ -1157,7 +1285,15 @@ impl QuickBrowser {
                         this.navigate_history(HistoryDirection::Forward, window, cx);
                     })),
             )
-            .child(
+            .child(if loading {
+                Button::new("stop")
+                    .ghost()
+                    .icon(AppIcon::Close)
+                    .tooltip(self.language.stop_loading())
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.stop_loading(cx);
+                    }))
+            } else {
                 Button::new("reload")
                     .ghost()
                     .icon(AppIcon::Refresh)
@@ -1165,8 +1301,8 @@ impl QuickBrowser {
                     .disabled(current.is_none())
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.navigate_history(HistoryDirection::Reload, window, cx);
-                    })),
-            )
+                    }))
+            })
             .child(
                 div().flex_1().rounded_lg().bg(cx.theme().secondary).child(
                     Input::new(&self.address_input)
@@ -1229,7 +1365,11 @@ impl QuickBrowser {
                 )
                 .into_any_element();
         }
-        let Some(rendered) = &self.rendered else {
+        let Some(rendered) = self
+            .selected_page
+            .as_ref()
+            .and_then(|page_id| self.rendered_pages.get(page_id))
+        else {
             return v_flex()
                 .size_full()
                 .items_center()
