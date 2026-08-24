@@ -19,6 +19,7 @@ pub enum ControlKind {
     Radio,
     Select,
     Submit,
+    Button,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -174,7 +175,10 @@ impl FormState {
                 ControlKind::Submit if Some(control.id) == submitter => {
                     Some(control.value.as_str())
                 }
-                ControlKind::Checkbox | ControlKind::Radio | ControlKind::Submit => None,
+                ControlKind::Checkbox
+                | ControlKind::Radio
+                | ControlKind::Submit
+                | ControlKind::Button => None,
             };
             if let Some(value) = value {
                 serializer.append_pair(name, value);

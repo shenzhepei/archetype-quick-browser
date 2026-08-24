@@ -6,6 +6,7 @@ use thiserror::Error;
 use url::Url;
 
 pub const DOCUMENT_LIMIT: usize = 5 * 1024 * 1024;
+pub const FORM_BODY_LIMIT: usize = 1024 * 1024;
 const MAXIMUM_REDIRECTS: usize = 10;
 
 #[derive(Clone, Debug)]
@@ -82,6 +83,16 @@ pub struct Loader {
     client: Client,
 }
 
+#[derive(Clone, Copy)]
+struct HttpNavigation<'a> {
+    url: &'a Url,
+    limit: usize,
+    top_level_url: &'a Url,
+    is_top_level_navigation: bool,
+    method: RequestMethod,
+    body: Option<&'a str>,
+}
+
 impl Loader {
     /// Builds the constrained V3 HTTP client.
     ///
@@ -138,11 +149,45 @@ impl Loader {
         match url.scheme() {
             "file" => Self::load_file(url, limit),
             "http" | "https" => self.load_http_redirects(
-                url,
-                limit,
+                HttpNavigation {
+                    url,
+                    limit,
+                    top_level_url,
+                    is_top_level_navigation,
+                    method: RequestMethod::Get,
+                    body: None,
+                },
                 Some(cookie_jar),
-                top_level_url,
-                is_top_level_navigation,
+            ),
+            scheme => Err(LoadError::UnsupportedScheme(scheme.to_owned())),
+        }
+    }
+
+    /// Submits a user-initiated form-urlencoded POST with Cookie policy on every redirect hop.
+    ///
+    /// # Errors
+    /// Returns [`LoadError`] when the body exceeds 1 MiB or the request, redirect, response, or
+    /// response size violates the loader limits.
+    pub fn submit_with_cookies(
+        &self,
+        url: &Url,
+        limit: usize,
+        cookie_jar: &mut CookieJar,
+        top_level_url: &Url,
+        body: &str,
+    ) -> Result<ResponseBytes, LoadError> {
+        ensure_limit(body.as_bytes(), FORM_BODY_LIMIT)?;
+        match url.scheme() {
+            "http" | "https" => self.load_http_redirects(
+                HttpNavigation {
+                    url,
+                    limit,
+                    top_level_url,
+                    is_top_level_navigation: true,
+                    method: RequestMethod::Post,
+                    body: Some(body),
+                },
+                Some(cookie_jar),
             ),
             scheme => Err(LoadError::UnsupportedScheme(scheme.to_owned())),
         }
@@ -163,28 +208,46 @@ impl Loader {
     }
 
     fn load_http(&self, url: &Url, limit: usize) -> Result<ResponseBytes, LoadError> {
-        self.load_http_redirects(url, limit, None, url, true)
+        self.load_http_redirects(
+            HttpNavigation {
+                url,
+                limit,
+                top_level_url: url,
+                is_top_level_navigation: true,
+                method: RequestMethod::Get,
+                body: None,
+            },
+            None,
+        )
     }
 
     fn load_http_redirects(
         &self,
-        url: &Url,
-        limit: usize,
+        navigation: HttpNavigation<'_>,
         mut cookie_jar: Option<&mut CookieJar>,
-        top_level_url: &Url,
-        is_top_level_navigation: bool,
     ) -> Result<ResponseBytes, LoadError> {
-        let mut current_url = url.clone();
+        let mut current_url = navigation.url.clone();
+        let mut method = navigation.method;
         for redirect_count in 0..=MAXIMUM_REDIRECTS {
             let cookie_header = cookie_jar.as_deref().and_then(|jar| {
                 jar.request_header(CookieRequest {
                     url: &current_url,
-                    top_level_url,
-                    method: RequestMethod::Get,
-                    is_top_level_navigation,
+                    top_level_url: navigation.top_level_url,
+                    method,
+                    is_top_level_navigation: navigation.is_top_level_navigation,
                 })
             });
-            let mut request = self.client.get(current_url.clone());
+            let mut request = match method {
+                RequestMethod::Get => self.client.get(current_url.clone()),
+                RequestMethod::Post => self
+                    .client
+                    .post(current_url.clone())
+                    .header(
+                        reqwest::header::CONTENT_TYPE,
+                        "application/x-www-form-urlencoded",
+                    )
+                    .body(navigation.body.unwrap_or_default().to_owned()),
+            };
             if let Some(cookie_header) = cookie_header {
                 request = request.header(reqwest::header::COOKIE, cookie_header);
             }
@@ -205,13 +268,21 @@ impl Loader {
                     .get(reqwest::header::LOCATION)
                     .and_then(|value| value.to_str().ok())
                     .ok_or(LoadError::InvalidRedirect)?;
+                if response.status() == reqwest::StatusCode::SEE_OTHER
+                    || (matches!(
+                        response.status(),
+                        reqwest::StatusCode::MOVED_PERMANENTLY | reqwest::StatusCode::FOUND
+                    ) && method == RequestMethod::Post)
+                {
+                    method = RequestMethod::Get;
+                }
                 current_url = current_url
                     .join(location)
                     .map_err(|_| LoadError::InvalidRedirect)?;
                 continue;
             }
             let response = response.error_for_status()?;
-            return Self::read_http_response(response, limit);
+            return Self::read_http_response(response, navigation.limit);
         }
         Err(LoadError::TooManyRedirects)
     }
@@ -360,6 +431,48 @@ mod tests {
         server.join().unwrap();
         assert_eq!(response.final_url.path(), "/final");
         assert_eq!(response.body, b"<p>ready</p>");
+    }
+
+    #[test]
+    fn post_redirects_switch_or_preserve_methods_by_status() {
+        for (status, expected_method) in [(303, "GET"), (307, "POST")] {
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            let address = listener.local_addr().unwrap();
+            let server = thread::spawn(move || {
+                for index in 0..2 {
+                    let (mut stream, _) = listener.accept().unwrap();
+                    let mut request = [0_u8; 4096];
+                    let length = stream.read(&mut request).unwrap();
+                    let request = String::from_utf8_lossy(&request[..length]);
+                    if index == 0 {
+                        assert!(request.starts_with("POST /submit "));
+                        assert!(request.contains("query=rust+browser"));
+                        write!(
+                            stream,
+                            "HTTP/1.1 {status} Redirect\r\nLocation: /done\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                        )
+                        .unwrap();
+                    } else {
+                        assert!(request.starts_with(&format!("{expected_method} /done ")));
+                        if expected_method == "POST" {
+                            assert!(request.contains("query=rust+browser"));
+                        }
+                        write!(
+                            stream,
+                            "HTTP/1.1 200 OK\r\nContent-Length: 19\r\nConnection: close\r\n\r\n<title>Done</title>"
+                        )
+                        .unwrap();
+                    }
+                }
+            });
+            let url = Url::parse(&format!("http://{address}/submit")).unwrap();
+            let mut jar = CookieJar::new();
+            let response = Loader::default()
+                .submit_with_cookies(&url, DOCUMENT_LIMIT, &mut jar, &url, "query=rust+browser")
+                .unwrap();
+            server.join().unwrap();
+            assert_eq!(response.final_url.path(), "/done");
+        }
     }
 
     #[test]

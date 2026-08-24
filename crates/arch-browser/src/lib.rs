@@ -7,6 +7,9 @@ use arch_paint::DisplayList;
 use arch_session::{
     BrowserCommand, BrowserEvent, Session,
     cookies::{CookieJar, CookieRequest},
+    forms::{
+        ControlId, ControlKind, FormControl, FormMethod, FormState, FormSubmission, SelectOption,
+    },
 };
 use arch_store::{Bookmark, Page, Space, Store};
 use archetype_types::{ArchetypeUrl, LoadStage, NavigationId, PageId};
@@ -31,6 +34,7 @@ pub struct RenderedPage {
     pub display_list: DisplayList,
     pub diagnostics: Vec<String>,
     pub image_resources: HashMap<String, Vec<u8>>,
+    pub forms: Vec<FormState>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -298,6 +302,36 @@ impl BrowserCore {
     ) -> Result<RenderedPage> {
         let pending = self.start_navigation(page, url)?;
         self.execute_navigation(page, &pending, viewport_width)
+    }
+
+    /// Executes a user-initiated GET or form-urlencoded POST submission.
+    ///
+    /// # Errors
+    /// Returns an error when loading, rendering, Cookie persistence, or navigation persistence
+    /// fails.
+    pub fn submit_form(
+        &mut self,
+        page: &Page,
+        submission: &FormSubmission,
+        viewport_width: f32,
+    ) -> Result<RenderedPage> {
+        let pending = self.start_navigation(page, &submission.target)?;
+        if submission.method == FormMethod::Get {
+            return self.execute_navigation(page, &pending, viewport_width);
+        }
+        let render_result = render_post_with_cookies(
+            &self.loader,
+            &mut self.cookie_jar,
+            submission,
+            &pending.top_level_url,
+            viewport_width,
+        );
+        self.persist_cookie_jar()?;
+        let rendered = render_result?;
+        if !self.finish_navigation(page, &pending, &rendered)? {
+            anyhow::bail!("form submission result became stale");
+        }
+        Ok(rendered)
     }
 
     /// Navigates to the previous in-memory history entry.
@@ -600,20 +634,54 @@ fn render_url_with_cookies(
     render_url_with_loader(&mut loader, url, viewport_width)
 }
 
+fn render_post_with_cookies(
+    loader: &Loader,
+    cookie_jar: &mut CookieJar,
+    submission: &FormSubmission,
+    top_level_url: &Url,
+    viewport_width: f32,
+) -> Result<RenderedPage> {
+    validate_viewport(&submission.target, viewport_width)?;
+    let response = loader
+        .submit_with_cookies(
+            &submission.target,
+            arch_net::DOCUMENT_LIMIT,
+            cookie_jar,
+            top_level_url,
+            &submission.encoded,
+        )
+        .map_err(|source| RenderError::Load {
+            url: submission.target.clone(),
+            source,
+        })?;
+    let mut loader = CookiePageLoader {
+        loader,
+        cookie_jar,
+        top_level_url: response.final_url.clone(),
+    };
+    render_response_with_loader(&mut loader, &response, viewport_width)
+}
+
 fn render_url_with_loader(
     loader: &mut impl PageResourceLoader,
     url: &Url,
     viewport_width: f32,
 ) -> Result<RenderedPage> {
-    if !viewport_width.is_finite() || viewport_width <= 0.0 {
-        return Err(RenderError::Render { url: url.clone() }.into());
-    }
+    validate_viewport(url, viewport_width)?;
     let response = loader
         .load(url, arch_net::DOCUMENT_LIMIT, ResourceContext::Document)
         .map_err(|source| RenderError::Load {
             url: url.clone(),
             source,
         })?;
+    render_response_with_loader(loader, &response, viewport_width)
+}
+
+fn render_response_with_loader(
+    loader: &mut impl PageResourceLoader,
+    response: &ResponseBytes,
+    viewport_width: f32,
+) -> Result<RenderedPage> {
     let source = str::from_utf8(&response.body).map_err(|source| RenderError::Parse {
         url: response.final_url.clone(),
         source,
@@ -675,6 +743,13 @@ fn render_url_with_loader(
     Ok(rendered)
 }
 
+fn validate_viewport(url: &Url, viewport_width: f32) -> Result<()> {
+    if !viewport_width.is_finite() || viewport_width <= 0.0 {
+        return Err(RenderError::Render { url: url.clone() }.into());
+    }
+    Ok(())
+}
+
 #[must_use]
 pub fn render_html(url: &Url, source: &str, viewport_width: f32) -> RenderedPage {
     let document = arch_html::parse(source);
@@ -703,7 +778,143 @@ fn render_document(
         display_list,
         diagnostics,
         image_resources: HashMap::new(),
+        forms: extract_forms(document, url),
     }
+}
+
+fn extract_forms(document: &arch_dom::Document, base: &Url) -> Vec<FormState> {
+    document
+        .descendants(document.root())
+        .filter_map(|node| {
+            let NodeKind::Element(element) = &node.kind else {
+                return None;
+            };
+            if element.name != "form" {
+                return None;
+            }
+            let action = element
+                .attribute("action")
+                .and_then(|action| base.join(action).ok())
+                .unwrap_or_else(|| base.clone());
+            let method = if element
+                .attribute("method")
+                .is_some_and(|method| method.eq_ignore_ascii_case("post"))
+            {
+                FormMethod::Post
+            } else {
+                FormMethod::Get
+            };
+            let controls = document
+                .descendants(node.id)
+                .filter_map(|control| extract_form_control(document, control))
+                .collect();
+            Some(FormState::new(action, method, controls))
+        })
+        .collect()
+}
+
+fn extract_form_control(
+    document: &arch_dom::Document,
+    node: &arch_dom::Node,
+) -> Option<FormControl> {
+    let NodeKind::Element(element) = &node.kind else {
+        return None;
+    };
+    if element.attribute("disabled").is_some() {
+        return None;
+    }
+    let name = element.attribute("name").map(str::to_owned);
+    let (kind, value, checked, options, selected_index) = match element.name.as_str() {
+        "input" => {
+            let input_type = element.attribute("type").unwrap_or("text");
+            let kind = match input_type.to_ascii_lowercase().as_str() {
+                "text" => ControlKind::Text,
+                "password" => ControlKind::Password,
+                "checkbox" => ControlKind::Checkbox,
+                "radio" => ControlKind::Radio,
+                "submit" => ControlKind::Submit,
+                "button" => ControlKind::Button,
+                _ => return None,
+            };
+            let default = if matches!(kind, ControlKind::Checkbox | ControlKind::Radio) {
+                "on"
+            } else if kind == ControlKind::Submit {
+                "Submit"
+            } else {
+                ""
+            };
+            (
+                kind,
+                element.attribute("value").unwrap_or(default).to_owned(),
+                element.attribute("checked").is_some(),
+                Vec::new(),
+                None,
+            )
+        }
+        "select" => {
+            let options: Vec<_> = document
+                .descendants(node.id)
+                .filter_map(|option| {
+                    let NodeKind::Element(option_element) = &option.kind else {
+                        return None;
+                    };
+                    if option_element.name != "option"
+                        || option_element.attribute("disabled").is_some()
+                    {
+                        return None;
+                    }
+                    let label = document.text_content(option.id);
+                    Some((
+                        SelectOption {
+                            value: option_element
+                                .attribute("value")
+                                .unwrap_or(&label)
+                                .to_owned(),
+                            label,
+                        },
+                        option_element.attribute("selected").is_some(),
+                    ))
+                })
+                .collect();
+            let selected_index = options
+                .iter()
+                .position(|(_, selected)| *selected)
+                .or((!options.is_empty()).then_some(0));
+            (
+                ControlKind::Select,
+                String::new(),
+                false,
+                options.into_iter().map(|(option, _)| option).collect(),
+                selected_index,
+            )
+        }
+        "button" => {
+            let kind = match element.attribute("type").unwrap_or("submit") {
+                value if value.eq_ignore_ascii_case("submit") => ControlKind::Submit,
+                value if value.eq_ignore_ascii_case("button") => ControlKind::Button,
+                _ => return None,
+            };
+            (
+                kind,
+                element
+                    .attribute("value")
+                    .map_or_else(|| document.text_content(node.id), str::to_owned),
+                false,
+                Vec::new(),
+                None,
+            )
+        }
+        _ => return None,
+    };
+    Some(FormControl {
+        id: ControlId(node.id.0),
+        name,
+        kind,
+        value,
+        checked,
+        options,
+        selected_index,
+    })
 }
 
 fn document_diagnostics(document: &arch_dom::Document) -> Vec<String> {
@@ -1449,6 +1660,84 @@ mod tests {
             "Check"
         );
         server.join().unwrap();
+    }
+
+    #[test]
+    fn extracts_basic_form_controls_and_successful_values() {
+        let page = render_html(
+            &Url::parse("https://example.com/account/page").unwrap(),
+            "<form action='../submit' method='post'>
+               <input name='user' value='Ada'>
+               <input type='password' name='password'>
+               <input type='checkbox' name='remember' value='yes' checked>
+               <input type='radio' name='mode' value='one'>
+               <input type='radio' name='mode' value='two' checked>
+               <select name='size'><option value='s'>Small</option><option value='l' selected>Large</option></select>
+               <button name='submit' value='go'>Send</button>
+               <button type='button'>No action</button>
+             </form>",
+            1280.0,
+        );
+        assert_eq!(page.forms.len(), 1);
+        let form = &page.forms[0];
+        assert_eq!(form.action.as_str(), "https://example.com/submit");
+        assert_eq!(form.method, FormMethod::Post);
+        assert_eq!(form.controls.len(), 8);
+        let submitter = form
+            .controls
+            .iter()
+            .find(|control| control.kind == ControlKind::Submit)
+            .unwrap()
+            .id;
+        let submission = form.submission(Some(submitter)).unwrap();
+        assert_eq!(
+            submission.encoded,
+            "user=Ada&password=&remember=yes&mode=two&size=l&submit=go"
+        );
+    }
+
+    #[test]
+    fn application_core_submits_form_urlencoded_post() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = [0_u8; 4096];
+            let length = stream.read(&mut request).unwrap();
+            let request = String::from_utf8_lossy(&request[..length]);
+            assert!(request.starts_with("POST /submit "));
+            assert!(
+                request
+                    .to_ascii_lowercase()
+                    .contains("content-type: application/x-www-form-urlencoded")
+            );
+            assert!(request.ends_with("query=rust+browser"));
+            write!(
+                stream,
+                "HTTP/1.1 200 OK\r\nContent-Length: 21\r\nConnection: close\r\n\r\n<title>Posted</title>"
+            )
+            .unwrap();
+        });
+        let target = Url::parse(&format!("http://{address}/submit")).unwrap();
+        let form = FormState::new(
+            target.clone(),
+            FormMethod::Post,
+            vec![FormControl {
+                id: ControlId(1),
+                name: Some("query".to_owned()),
+                kind: ControlKind::Text,
+                value: "rust browser".to_owned(),
+                checked: false,
+                options: Vec::new(),
+                selected_index: None,
+            }],
+        );
+        let submission = form.submission(None).unwrap();
+        let mut core = BrowserCore::in_memory().unwrap();
+        let page = core.create_page(&target).unwrap();
+        let rendered = core.submit_form(&page, &submission, 1280.0).unwrap();
+        server.join().unwrap();
+        assert_eq!(rendered.title, "Posted");
     }
 
     #[test]
