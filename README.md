@@ -149,16 +149,20 @@ The scoped product requirements and detailed implementation plans are in:
 
 ## V4 Development
 
-- The stable type, protocol, and C1 subprocess slices are complete: UUID V7 page IDs, monotonic
+- The stable type, protocol, C1 subprocess, and C2 resource-broker slices are complete: UUID V7 page IDs, monotonic
   navigation IDs, validated URL values, a versioned length-prefixed JSON codec, capability
   negotiation, bounded in-memory transport, request routing, cancellation, timeout handling,
   backpressure, protocol fuzzing, a real Renderer Runtime handshake, static document rendering,
   display-list return, asynchronous Browser supervision, structured disconnects, and a 20-cycle
-  subprocess termination test.
+  subprocess termination test. The Browser now transfers size-limited same-origin stylesheet and
+  image bytes; Runtime parses and decodes those bytes without receiving paths or using `arch-net`.
+- Local document subresources are restricted to the document directory tree, cross-origin and
+  cross-origin redirect resources are rejected, and the final encoded request is checked against
+  the 16 MiB protocol frame limit before it reaches the child process.
 - The subprocess path is not yet the desktop application's default navigation path and is not a
-  security sandbox. The next slice is C2 brokered resource transfer. V4 remains incomplete until
-  desktop integration, the macOS sandbox, session features, Flexbox, hibernation, and release
-  acceptance all pass the paired specification.
+  security sandbox. The next slice is D1 macOS sandboxing and resource supervision. V4 remains
+  incomplete until desktop integration, signed sandbox evidence, session features, Flexbox,
+  hibernation, and release acceptance all pass the paired specification.
 
 ## License
 
