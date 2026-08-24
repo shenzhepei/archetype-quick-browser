@@ -1,8 +1,11 @@
-use std::time::Duration;
+use std::{
+    thread,
+    time::{Duration, Instant},
+};
 
 use arch_browser::{
     runtime_broker::{BrokerRequest, load_static_document},
-    runtime_supervisor::{RuntimeProcessError, RuntimeSupervisor, StaticDocument},
+    runtime_supervisor::{RuntimeLimits, RuntimeProcessError, RuntimeSupervisor, StaticDocument},
 };
 use arch_net::Loader;
 use archetype_types::{NavigationId, PageId};
@@ -24,13 +27,59 @@ fn document() -> StaticDocument {
 }
 
 fn start() -> RuntimeSupervisor {
-    let (supervisor, ready) = RuntimeSupervisor::spawn(env!("CARGO_BIN_EXE_archetype-runtime"))
-        .expect("supervisor thread should start");
+    start_with_limits(RuntimeLimits::default())
+}
+
+fn start_with_limits(limits: RuntimeLimits) -> RuntimeSupervisor {
+    let (supervisor, ready) =
+        RuntimeSupervisor::spawn_with_limits(env!("CARGO_BIN_EXE_archetype-runtime"), limits)
+            .expect("supervisor thread should start");
     ready
         .recv_timeout(PROCESS_TIMEOUT)
         .expect("runtime handshake should complete")
         .expect("runtime handshake should succeed");
     supervisor
+}
+
+#[test]
+fn encoded_requests_respect_the_in_flight_byte_limit() {
+    let supervisor = start_with_limits(RuntimeLimits {
+        maximum_in_flight_bytes: 1,
+        ..RuntimeLimits::default()
+    });
+
+    assert!(matches!(
+        supervisor
+            .render_document(document())
+            .recv_timeout(PROCESS_TIMEOUT),
+        Ok(Err(RuntimeProcessError::Backpressure))
+    ));
+}
+
+#[test]
+fn rss_limit_terminates_runtime_with_a_structured_reason() {
+    let supervisor = start_with_limits(RuntimeLimits {
+        maximum_rss_bytes: 1,
+        ..RuntimeLimits::default()
+    });
+    let deadline = Instant::now() + PROCESS_TIMEOUT;
+
+    loop {
+        let result = supervisor
+            .render_document(document())
+            .recv_timeout(PROCESS_TIMEOUT)
+            .expect("render should return a structured result");
+        if result
+            == Err(RuntimeProcessError::ResourceLimit {
+                resource: "RSS".to_owned(),
+            })
+        {
+            break;
+        }
+        assert!(result.is_ok(), "unexpected runtime result: {result:?}");
+        assert!(Instant::now() < deadline, "RSS limit was not enforced");
+        thread::sleep(Duration::from_millis(20));
+    }
 }
 
 #[test]

@@ -4,8 +4,8 @@ use std::{
     path::Path,
     process::{Child, ChildStdin, Command, Stdio},
     sync::{
-        Arc,
-        atomic::{AtomicBool, Ordering},
+        Arc, Mutex,
+        atomic::{AtomicBool, AtomicUsize, Ordering},
         mpsc::{self, Receiver, RecvTimeoutError, SyncSender, TrySendError},
     },
     thread,
@@ -23,10 +23,27 @@ use thiserror::Error;
 const LAUNCH_AUTH_MAGIC: [u8; 4] = *b"ARUN";
 const LAUNCH_TOKEN_BYTES: usize = 32;
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
-const REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
 const COMMAND_QUEUE_LIMIT: usize = 256;
 const MAXIMUM_PENDING_REQUESTS: usize = 64;
 const SUPERVISOR_TICK: Duration = Duration::from_millis(10);
+const RESOURCE_SAMPLE_INTERVAL: Duration = Duration::from_millis(250);
+
+#[derive(Clone, Copy, Debug)]
+pub struct RuntimeLimits {
+    pub request_timeout: Duration,
+    pub maximum_rss_bytes: u64,
+    pub maximum_in_flight_bytes: usize,
+}
+
+impl Default for RuntimeLimits {
+    fn default() -> Self {
+        Self {
+            request_timeout: Duration::from_secs(5),
+            maximum_rss_bytes: 512 * 1024 * 1024,
+            maximum_in_flight_bytes: 64 * 1024 * 1024,
+        }
+    }
+}
 
 #[derive(Clone, Debug)]
 pub struct StaticDocument {
@@ -90,6 +107,8 @@ pub enum RuntimeProcessError {
     UnexpectedResponse,
     #[error("renderer runtime failed with {code}: {message}")]
     RuntimeFailure { code: String, message: String },
+    #[error("renderer runtime exceeded its {resource} limit")]
+    ResourceLimit { resource: String },
 }
 
 pub type ReadyReceiver = Receiver<Result<(), RuntimeProcessError>>;
@@ -99,6 +118,9 @@ pub type ShutdownReceiver = Receiver<Result<(), RuntimeProcessError>>;
 pub struct RuntimeSupervisor {
     commands: SyncSender<SupervisorCommand>,
     active: Arc<AtomicBool>,
+    queued_bytes: Arc<AtomicUsize>,
+    terminal_error: Arc<Mutex<Option<RuntimeProcessError>>>,
+    limits: RuntimeLimits,
 }
 
 impl RuntimeSupervisor {
@@ -112,11 +134,26 @@ impl RuntimeSupervisor {
     pub fn spawn(
         executable: impl AsRef<Path>,
     ) -> Result<(Self, ReadyReceiver), RuntimeProcessError> {
+        Self::spawn_with_limits(executable, RuntimeLimits::default())
+    }
+
+    /// Starts a supervisor with explicit limits for automated probes.
+    ///
+    /// # Errors
+    /// Returns an error only when the supervisor thread itself cannot be created.
+    pub fn spawn_with_limits(
+        executable: impl AsRef<Path>,
+        limits: RuntimeLimits,
+    ) -> Result<(Self, ReadyReceiver), RuntimeProcessError> {
         let executable = executable.as_ref().to_owned();
         let (command_sender, command_receiver) = mpsc::sync_channel(COMMAND_QUEUE_LIMIT);
         let (ready_sender, ready_receiver) = mpsc::sync_channel(1);
         let active = Arc::new(AtomicBool::new(true));
         let supervisor_active = Arc::clone(&active);
+        let queued_bytes = Arc::new(AtomicUsize::new(0));
+        let supervisor_queued_bytes = Arc::clone(&queued_bytes);
+        let terminal_error = Arc::new(Mutex::new(None));
+        let supervisor_terminal_error = Arc::clone(&terminal_error);
         thread::Builder::new()
             .name("archetype-runtime-supervisor".to_owned())
             .spawn(move || {
@@ -125,6 +162,9 @@ impl RuntimeSupervisor {
                     &command_receiver,
                     &ready_sender,
                     &supervisor_active,
+                    &supervisor_queued_bytes,
+                    &supervisor_terminal_error,
+                    limits,
                 );
             })
             .map_err(|error| RuntimeProcessError::SupervisorStart(error.to_string()))?;
@@ -132,6 +172,9 @@ impl RuntimeSupervisor {
             Self {
                 commands: command_sender,
                 active,
+                queued_bytes,
+                terminal_error,
+                limits,
             },
             ready_receiver,
         ))
@@ -140,14 +183,29 @@ impl RuntimeSupervisor {
     #[must_use]
     pub fn render_document(&self, document: StaticDocument) -> RenderReceiver {
         if !self.active.load(Ordering::Acquire) {
-            return completed(RuntimeProcessError::RuntimeDisconnected);
+            return completed(self.inactive_error());
+        }
+        let mut frame = Vec::new();
+        if let Err(error) = Codec::default().encode(&mut frame, &document.protocol_envelope(1)) {
+            return completed(RuntimeProcessError::Protocol(error.to_string()));
+        }
+        let reserved_bytes = frame.len().saturating_add(32);
+        if !reserve_bytes(
+            &self.queued_bytes,
+            reserved_bytes,
+            self.limits.maximum_in_flight_bytes,
+        ) {
+            return completed(RuntimeProcessError::Backpressure);
         }
         let (completion_sender, completion_receiver) = mpsc::sync_channel(1);
         let command = SupervisorCommand::Render {
             document,
+            reserved_bytes,
             completion: completion_sender,
         };
         if let Err(error) = self.commands.try_send(command) {
+            self.queued_bytes
+                .fetch_sub(reserved_bytes, Ordering::AcqRel);
             let failure = match error {
                 TrySendError::Full(_) => RuntimeProcessError::Backpressure,
                 TrySendError::Disconnected(_) => RuntimeProcessError::RuntimeDisconnected,
@@ -160,7 +218,7 @@ impl RuntimeSupervisor {
     #[must_use]
     pub fn shutdown(&self) -> ShutdownReceiver {
         if !self.active.load(Ordering::Acquire) {
-            return completed(RuntimeProcessError::RuntimeDisconnected);
+            return completed(self.inactive_error());
         }
         let (completion_sender, completion_receiver) = mpsc::sync_channel(1);
         if let Err(error) = self
@@ -174,6 +232,14 @@ impl RuntimeSupervisor {
             return completed(failure);
         }
         completion_receiver
+    }
+
+    fn inactive_error(&self) -> RuntimeProcessError {
+        self.terminal_error
+            .lock()
+            .ok()
+            .and_then(|error| error.clone())
+            .unwrap_or(RuntimeProcessError::RuntimeDisconnected)
     }
 }
 
@@ -189,6 +255,7 @@ impl Drop for RuntimeSupervisor {
 enum SupervisorCommand {
     Render {
         document: StaticDocument,
+        reserved_bytes: usize,
         completion: SyncSender<Result<RuntimeRenderedPage, RuntimeProcessError>>,
     },
     Shutdown(SyncSender<Result<(), RuntimeProcessError>>),
@@ -206,7 +273,91 @@ struct PendingRender {
     navigation_id: NavigationId,
     broker_diagnostics: Vec<String>,
     image_resources: HashMap<String, Vec<u8>>,
+    frame_bytes: usize,
     completion: SyncSender<Result<RuntimeRenderedPage, RuntimeProcessError>>,
+}
+
+struct RuntimeConnection {
+    input: ChildStdin,
+    pending: BTreeMap<u64, PendingRender>,
+    next_request_id: u64,
+    in_flight_bytes: usize,
+    limits: RuntimeLimits,
+}
+
+impl RuntimeConnection {
+    fn new(input: ChildStdin, limits: RuntimeLimits) -> Self {
+        Self {
+            input,
+            pending: BTreeMap::new(),
+            next_request_id: 2,
+            in_flight_bytes: 0,
+            limits,
+        }
+    }
+
+    fn queue_render(
+        &mut self,
+        document: StaticDocument,
+        completion: SyncSender<Result<RuntimeRenderedPage, RuntimeProcessError>>,
+    ) -> Result<(), RuntimeProcessError> {
+        if self.pending.len() >= MAXIMUM_PENDING_REQUESTS {
+            let _ = completion.send(Err(RuntimeProcessError::Backpressure));
+            return Ok(());
+        }
+        let request_id = self.next_request_id;
+        let Some(following_request_id) = request_id.checked_add(1) else {
+            let _ = completion.send(Err(RuntimeProcessError::Backpressure));
+            return Ok(());
+        };
+        let mut frame = Vec::new();
+        if let Err(error) =
+            Codec::default().encode(&mut frame, &document.protocol_envelope(request_id))
+        {
+            let _ = completion.send(Err(RuntimeProcessError::Protocol(error.to_string())));
+            return Ok(());
+        }
+        if self.in_flight_bytes.saturating_add(frame.len()) > self.limits.maximum_in_flight_bytes {
+            let _ = completion.send(Err(RuntimeProcessError::Backpressure));
+            return Ok(());
+        }
+        if let Err(error) = write_frame(&mut self.input, &frame) {
+            let _ = completion.send(Err(error.clone()));
+            return Err(error);
+        }
+        self.next_request_id = following_request_id;
+        self.in_flight_bytes += frame.len();
+        self.pending.insert(
+            request_id,
+            PendingRender {
+                deadline: Instant::now() + self.limits.request_timeout,
+                page_id: document.page_id,
+                navigation_id: document.navigation_id,
+                broker_diagnostics: document.broker_diagnostics,
+                image_resources: document
+                    .resources
+                    .into_iter()
+                    .filter(|resource| resource.kind == ResourceKind::Image)
+                    .map(|resource| (resource.requested_url.to_string(), resource.body.into_vec()))
+                    .collect(),
+                frame_bytes: frame.len(),
+                completion,
+            },
+        );
+        Ok(())
+    }
+
+    fn drain_responses(&mut self, responses: &Receiver<ReaderEvent>) -> bool {
+        drain_responses(responses, &mut self.pending, &mut self.in_flight_bytes)
+    }
+
+    fn expire_requests(&mut self) -> bool {
+        expire_requests(&mut self.pending, &mut self.in_flight_bytes)
+    }
+
+    fn fail_pending(&mut self, error: &RuntimeProcessError) {
+        fail_pending(&mut self.pending, &mut self.in_flight_bytes, error);
+    }
 }
 
 fn supervise(
@@ -214,6 +365,9 @@ fn supervise(
     commands: &Receiver<SupervisorCommand>,
     ready: &SyncSender<Result<(), RuntimeProcessError>>,
     active: &AtomicBool,
+    queued_bytes: &AtomicUsize,
+    terminal_error: &Mutex<Option<RuntimeProcessError>>,
+    limits: RuntimeLimits,
 ) {
     let (mut child, mut input, responses, reader) = match start_child(executable) {
         Ok(process) => process,
@@ -231,57 +385,43 @@ fn supervise(
     }
     let _ = ready.send(Ok(()));
 
-    let mut next_request_id = 2_u64;
-    let mut pending = BTreeMap::new();
+    let mut connection = RuntimeConnection::new(input, limits);
+    let mut last_resource_sample = Instant::now();
     loop {
-        if !drain_responses(&responses, &mut pending) {
-            fail_pending(&mut pending, &RuntimeProcessError::RuntimeDisconnected);
+        if !connection.drain_responses(&responses) {
+            connection.fail_pending(&RuntimeProcessError::RuntimeDisconnected);
             break;
         }
-        expire_requests(&mut pending);
+        if connection.expire_requests() {
+            connection.fail_pending(&RuntimeProcessError::RuntimeDisconnected);
+            break;
+        }
+        if last_resource_sample.elapsed() >= RESOURCE_SAMPLE_INTERVAL {
+            last_resource_sample = Instant::now();
+            if resident_bytes(child.id()).is_some_and(|rss| rss > limits.maximum_rss_bytes) {
+                let error = RuntimeProcessError::ResourceLimit {
+                    resource: "RSS".to_owned(),
+                };
+                connection.fail_pending(&error);
+                record_terminal_error(terminal_error, error);
+                break;
+            }
+        }
         match commands.recv_timeout(SUPERVISOR_TICK) {
             Ok(SupervisorCommand::Render {
                 document,
+                reserved_bytes,
                 completion,
             }) => {
-                if pending.len() >= MAXIMUM_PENDING_REQUESTS {
-                    let _ = completion.send(Err(RuntimeProcessError::Backpressure));
-                    continue;
-                }
-                let request_id = next_request_id;
-                let Some(following_request_id) = next_request_id.checked_add(1) else {
-                    let _ = completion.send(Err(RuntimeProcessError::Backpressure));
-                    continue;
-                };
-                let envelope = document.protocol_envelope(request_id);
-                if let Err(error) = write_envelope(&mut input, &envelope) {
-                    let _ = completion.send(Err(error.clone()));
-                    fail_pending(&mut pending, &error);
+                queued_bytes.fetch_sub(reserved_bytes, Ordering::AcqRel);
+                if let Err(error) = connection.queue_render(document, completion) {
+                    connection.fail_pending(&error);
                     break;
                 }
-                next_request_id = following_request_id;
-                pending.insert(
-                    request_id,
-                    PendingRender {
-                        deadline: Instant::now() + REQUEST_TIMEOUT,
-                        page_id: document.page_id,
-                        navigation_id: document.navigation_id,
-                        broker_diagnostics: document.broker_diagnostics,
-                        image_resources: document
-                            .resources
-                            .into_iter()
-                            .filter(|resource| resource.kind == ResourceKind::Image)
-                            .map(|resource| {
-                                (resource.requested_url.to_string(), resource.body.into_vec())
-                            })
-                            .collect(),
-                        completion,
-                    },
-                );
             }
             Ok(SupervisorCommand::Shutdown(completion)) => {
                 active.store(false, Ordering::Release);
-                fail_pending(&mut pending, &RuntimeProcessError::RuntimeDisconnected);
+                connection.fail_pending(&RuntimeProcessError::RuntimeDisconnected);
                 terminate(&mut child, reader);
                 let _ = completion.send(Ok(()));
                 return;
@@ -289,7 +429,7 @@ fn supervise(
             Err(RecvTimeoutError::Timeout) => {}
             Err(RecvTimeoutError::Disconnected) => {
                 active.store(false, Ordering::Release);
-                fail_pending(&mut pending, &RuntimeProcessError::RuntimeDisconnected);
+                connection.fail_pending(&RuntimeProcessError::RuntimeDisconnected);
                 terminate(&mut child, reader);
                 return;
             }
@@ -435,17 +575,24 @@ fn perform_handshake(
 }
 
 fn write_envelope(input: &mut ChildStdin, envelope: &Envelope) -> Result<(), RuntimeProcessError> {
+    let mut frame = Vec::new();
     Codec::default()
-        .encode(&mut *input, envelope)
+        .encode(&mut frame, envelope)
         .map_err(|error| RuntimeProcessError::Protocol(error.to_string()))?;
+    write_frame(input, &frame)
+}
+
+fn write_frame(input: &mut ChildStdin, frame: &[u8]) -> Result<(), RuntimeProcessError> {
     input
-        .flush()
+        .write_all(frame)
+        .and_then(|()| input.flush())
         .map_err(|error| RuntimeProcessError::Protocol(error.to_string()))
 }
 
 fn drain_responses(
     responses: &Receiver<ReaderEvent>,
     pending: &mut BTreeMap<u64, PendingRender>,
+    in_flight_bytes: &mut usize,
 ) -> bool {
     for event in responses.try_iter() {
         let envelope = match event {
@@ -455,6 +602,7 @@ fn drain_responses(
         let Some(request) = pending.remove(&envelope.request_id()) else {
             continue;
         };
+        *in_flight_bytes = in_flight_bytes.saturating_sub(request.frame_bytes);
         let result = match envelope.into_message() {
             Message::Response(Response::Rendered {
                 page_id,
@@ -485,25 +633,35 @@ fn drain_responses(
     true
 }
 
-fn expire_requests(pending: &mut BTreeMap<u64, PendingRender>) {
+fn expire_requests(
+    pending: &mut BTreeMap<u64, PendingRender>,
+    in_flight_bytes: &mut usize,
+) -> bool {
     let now = Instant::now();
     let expired: Vec<_> = pending
         .iter()
         .filter_map(|(request_id, request)| (now >= request.deadline).then_some(*request_id))
         .collect();
-    for request_id in expired {
-        if let Some(request) = pending.remove(&request_id) {
+    for request_id in &expired {
+        if let Some(request) = pending.remove(request_id) {
+            *in_flight_bytes = in_flight_bytes.saturating_sub(request.frame_bytes);
             let _ = request
                 .completion
                 .send(Err(RuntimeProcessError::RequestTimedOut));
         }
     }
+    !expired.is_empty()
 }
 
-fn fail_pending(pending: &mut BTreeMap<u64, PendingRender>, error: &RuntimeProcessError) {
+fn fail_pending(
+    pending: &mut BTreeMap<u64, PendingRender>,
+    in_flight_bytes: &mut usize,
+    error: &RuntimeProcessError,
+) {
     for (_, request) in std::mem::take(pending) {
         let _ = request.completion.send(Err(error.clone()));
     }
+    *in_flight_bytes = 0;
 }
 
 fn terminate(child: &mut Child, reader: thread::JoinHandle<()>) {
@@ -516,4 +674,45 @@ fn completed<T>(error: RuntimeProcessError) -> Receiver<Result<T, RuntimeProcess
     let (sender, receiver) = mpsc::sync_channel(1);
     let _ = sender.send(Err(error));
     receiver
+}
+
+fn record_terminal_error(
+    terminal_error: &Mutex<Option<RuntimeProcessError>>,
+    error: RuntimeProcessError,
+) {
+    if let Ok(mut terminal_error) = terminal_error.lock() {
+        *terminal_error = Some(error);
+    }
+}
+
+fn reserve_bytes(queued: &AtomicUsize, bytes: usize, maximum: usize) -> bool {
+    let mut current = queued.load(Ordering::Acquire);
+    loop {
+        let Some(next) = current.checked_add(bytes) else {
+            return false;
+        };
+        if next > maximum {
+            return false;
+        }
+        match queued.compare_exchange_weak(current, next, Ordering::AcqRel, Ordering::Acquire) {
+            Ok(_) => return true,
+            Err(actual) => current = actual,
+        }
+    }
+}
+
+fn resident_bytes(process_id: u32) -> Option<u64> {
+    let output = Command::new("ps")
+        .args(["-o", "rss=", "-p", &process_id.to_string()])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let kibibytes = std::str::from_utf8(&output.stdout)
+        .ok()?
+        .trim()
+        .parse::<u64>()
+        .ok()?;
+    kibibytes.checked_mul(1024)
 }
