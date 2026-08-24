@@ -1,8 +1,8 @@
 # Third-Party Notices
 
-Dependency versions are locked in `Cargo.lock`. Before distribution, generate and review the
-complete license inventory. The V3 implementation currently uses crates under permissive or
-file-level copyleft licenses.
+Dependency versions are locked in `Cargo.lock`. The complete generated crate inventory, including
+versions, declared licenses, and upstream sources, is in [`THIRD_PARTY_LICENSES.md`](THIRD_PARTY_LICENSES.md).
+CI verifies that this inventory remains synchronized with the locked dependency graph.
 
 The SVG files in `assets/icons/system/` were extracted from the generated
 `@e-cloud/eslink-icons` sources and are used without their Vue/TypeScript runtime. The source
