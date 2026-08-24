@@ -5,7 +5,7 @@ use arch_dom::{Document, ElementData, NodeId, NodeKind};
 use serde::{Deserialize, Serialize};
 
 type Specificity = (u16, u16, u16);
-type CascadeWinner<'a> = (bool, Specificity, usize, usize, &'a str);
+type CascadeWinner = (bool, Specificity, usize, usize, String);
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub enum Display {
@@ -103,6 +103,14 @@ pub enum Overflow {
     Hidden,
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub enum Position {
+    #[default]
+    Static,
+    Relative,
+    Absolute,
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct EdgeSizes {
     pub top: f32,
@@ -141,6 +149,15 @@ pub struct ComputedStyle {
     pub column_gap: f32,
     pub flex_grow: f32,
     pub flex_shrink: f32,
+    pub flex_basis: Option<ComputedLength>,
+    pub order: i32,
+    pub position: Position,
+    pub top: Option<ComputedLength>,
+    pub right: Option<ComputedLength>,
+    pub bottom: Option<ComputedLength>,
+    pub left: Option<ComputedLength>,
+    pub z_index: i32,
+    pub custom_properties: BTreeMap<String, String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -151,15 +168,28 @@ pub struct StyledNode {
 
 #[must_use]
 pub fn style_document(document: &Document, stylesheet: &Stylesheet) -> Vec<StyledNode> {
+    style_document_for_viewport(document, stylesheet, 1280.0)
+}
+
+#[must_use]
+pub fn style_document_for_viewport(
+    document: &Document,
+    stylesheet: &Stylesheet,
+    viewport_width_px: f32,
+) -> Vec<StyledNode> {
     let mut output = Vec::new();
     let mut computed_by_node = HashMap::new();
     for node in document.descendants(document.root()) {
         let inherited = node.parent.and_then(|parent| computed_by_node.get(&parent));
         let mut style = ua_style(&node.kind, inherited);
         if matches!(&node.kind, NodeKind::Element(_)) {
-            let mut winners: BTreeMap<&str, CascadeWinner<'_>> = BTreeMap::new();
+            let mut winners: BTreeMap<String, CascadeWinner> = BTreeMap::new();
             for rule in &stylesheet.rules {
-                if selector_matches(document, node.id, &rule.selector) {
+                if rule
+                    .media
+                    .is_none_or(|media| media.matches_width(viewport_width_px))
+                    && selector_matches(document, node.id, &rule.selector)
+                {
                     let specificity = specificity(&rule.selector);
                     for (declaration_order, declaration) in rule.declarations.iter().enumerate() {
                         let candidate = (
@@ -167,18 +197,20 @@ pub fn style_document(document: &Document, stylesheet: &Stylesheet) -> Vec<Style
                             specificity,
                             rule.source_order,
                             declaration_order,
-                            declaration.value.as_str(),
+                            declaration.value.clone(),
                         );
                         if winners
-                            .get(declaration.name.as_str())
+                            .get(&declaration.name)
                             .is_none_or(|existing| candidate > *existing)
                         {
-                            winners.insert(declaration.name.as_str(), candidate);
+                            winners.insert(declaration.name.clone(), candidate);
                         }
                     }
                 }
             }
-            apply(&mut style, &winners);
+            apply_custom_properties(&mut style, &winners);
+            let resolved = resolve_declarations(&style.custom_properties, &winners);
+            apply(&mut style, &resolved);
         }
         computed_by_node.insert(node.id, style.clone());
         output.push(StyledNode {
@@ -272,27 +304,53 @@ fn ua_style(kind: &NodeKind, inherited: Option<&ComputedStyle>) -> ComputedStyle
         ..ComputedStyle::default()
     };
     if let Some(parent) = inherited {
-        style.color.clone_from(&parent.color);
-        style.font_family.clone_from(&parent.font_family);
-        if heading_font_size.is_none() {
-            style.font_size_px = parent.font_size_px;
-            style.line_height_px = parent.line_height_px;
-        }
-        if !has_pre_default {
-            style.white_space = parent.white_space;
-        }
-        if !has_bold_default {
-            style.font_weight = parent.font_weight;
-        }
-        if !has_italic_default {
-            style.font_style = parent.font_style;
-        }
-        style.text_align = parent.text_align;
+        inherit_style(
+            &mut style,
+            parent,
+            (u8::from(heading_font_size.is_some()) * UA_HEADING_SIZE)
+                | (u8::from(has_pre_default) * UA_PRE)
+                | (u8::from(has_bold_default) * UA_BOLD)
+                | (u8::from(has_italic_default) * UA_ITALIC),
+        );
     }
     style
 }
 
+const UA_HEADING_SIZE: u8 = 1;
+const UA_PRE: u8 = 1 << 1;
+const UA_BOLD: u8 = 1 << 2;
+const UA_ITALIC: u8 = 1 << 3;
+
+fn inherit_style(style: &mut ComputedStyle, parent: &ComputedStyle, defaults: u8) {
+    style.color.clone_from(&parent.color);
+    style.font_family.clone_from(&parent.font_family);
+    if defaults & UA_HEADING_SIZE == 0 {
+        style.font_size_px = parent.font_size_px;
+        style.line_height_px = parent.line_height_px;
+    }
+    if defaults & UA_PRE == 0 {
+        style.white_space = parent.white_space;
+    }
+    if defaults & UA_BOLD == 0 {
+        style.font_weight = parent.font_weight;
+    }
+    if defaults & UA_ITALIC == 0 {
+        style.font_style = parent.font_style;
+    }
+    style.text_align = parent.text_align;
+    style
+        .custom_properties
+        .clone_from(&parent.custom_properties);
+}
+
 fn selector_matches(document: &Document, node_id: NodeId, selector: &str) -> bool {
+    if selector == ":root" {
+        return document
+            .node(node_id)
+            .and_then(|node| node.parent)
+            .and_then(|parent| document.node(parent))
+            .is_some_and(|parent| matches!(parent.kind, NodeKind::Document));
+    }
     if selector.contains([',', ':', '[']) {
         return false;
     }
@@ -381,7 +439,7 @@ fn specificity(selector: &str) -> Specificity {
     )
 }
 
-fn apply(style: &mut ComputedStyle, declarations: &BTreeMap<&str, CascadeWinner<'_>>) {
+fn apply(style: &mut ComputedStyle, declarations: &BTreeMap<String, CascadeWinner>) {
     if let Some((_, _, _, _, value)) = declarations.get("font-size") {
         style.font_size_px =
             absolute_length(value, style.font_size_px).unwrap_or(style.font_size_px);
@@ -392,12 +450,12 @@ fn apply(style: &mut ComputedStyle, declarations: &BTreeMap<&str, CascadeWinner<
             parse_line_height(value, style.font_size_px).unwrap_or(style.line_height_px);
     }
     if let Some((_, _, _, _, value)) = declarations.get("color") {
-        style.color = Some((*value).to_owned());
+        style.color = Some(value.clone());
     }
     apply_border(style, declarations);
     for (name, (_, _, _, _, value)) in declarations {
         if matches!(
-            *name,
+            name.as_str(),
             "font-size" | "line-height" | "color" | "border" | "border-width" | "border-color"
         ) {
             continue;
@@ -408,16 +466,16 @@ fn apply(style: &mut ComputedStyle, declarations: &BTreeMap<&str, CascadeWinner<
         if apply_typography_property(style, name, value) {
             continue;
         }
-        match *name {
+        match name.as_str() {
             "display" => {
-                style.display = match *value {
+                style.display = match value.as_str() {
                     "block" => Display::Block,
                     "flex" => Display::Flex,
                     "none" => Display::None,
                     _ => Display::Inline,
                 };
             }
-            "background-color" => style.background_color = Some((*value).to_owned()),
+            "background-color" => style.background_color = Some(value.clone()),
             "font-family" => {
                 if let Some(family) = arch_css::first_font_family(value) {
                     style.font_family = Some(family);
@@ -446,17 +504,35 @@ fn apply(style: &mut ComputedStyle, declarations: &BTreeMap<&str, CascadeWinner<
             "min-width" => style.min_width = length(value, style.font_size_px),
             "max-width" => style.max_width = length(value, style.font_size_px),
             "box-sizing" => {
-                style.box_sizing = if *value == "border-box" {
+                style.box_sizing = if value == "border-box" {
                     BoxSizing::BorderBox
                 } else {
                     BoxSizing::ContentBox
                 };
             }
-            "overflow" => match *value {
+            "overflow" => match value.as_str() {
                 "visible" => style.overflow = Overflow::Visible,
                 "hidden" => style.overflow = Overflow::Hidden,
                 _ => {}
             },
+            "position" => {
+                style.position = match value.as_str() {
+                    "relative" => Position::Relative,
+                    "absolute" => Position::Absolute,
+                    _ => Position::Static,
+                };
+            }
+            "top" => style.top = length(value, style.font_size_px),
+            "right" => style.right = length(value, style.font_size_px),
+            "bottom" => style.bottom = length(value, style.font_size_px),
+            "left" => style.left = length(value, style.font_size_px),
+            "z-index" => {
+                if value == "auto" {
+                    style.z_index = 0;
+                } else if let Ok(value) = value.parse::<i32>() {
+                    style.z_index = value;
+                }
+            }
             _ => {}
         }
     }
@@ -545,9 +621,52 @@ fn apply_flex_property(style: &mut ComputedStyle, name: &str, value: &str) -> bo
         "flex-shrink" => {
             style.flex_shrink = nonnegative_number(value).unwrap_or(style.flex_shrink);
         }
+        "flex-basis" => {
+            style.flex_basis = if value == "auto" {
+                None
+            } else {
+                length(value, style.font_size_px)
+            };
+        }
+        "order" => {
+            if let Ok(value) = value.parse::<i32>() {
+                style.order = value;
+            }
+        }
         _ => return false,
     }
     true
+}
+
+fn apply_custom_properties(
+    style: &mut ComputedStyle,
+    declarations: &BTreeMap<String, CascadeWinner>,
+) {
+    for (name, (_, _, _, _, value)) in declarations {
+        if name.starts_with("--")
+            && (style.custom_properties.contains_key(name) || style.custom_properties.len() < 256)
+        {
+            style.custom_properties.insert(name.clone(), value.clone());
+        }
+    }
+}
+
+fn resolve_declarations(
+    custom_properties: &BTreeMap<String, String>,
+    declarations: &BTreeMap<String, CascadeWinner>,
+) -> BTreeMap<String, CascadeWinner> {
+    declarations
+        .iter()
+        .filter(|(name, _)| !name.starts_with("--"))
+        .filter_map(|(name, winner)| {
+            arch_css::resolve_variables(&winner.4, custom_properties).map(|value| {
+                (
+                    name.clone(),
+                    (winner.0, winner.1, winner.2, winner.3, value),
+                )
+            })
+        })
+        .collect()
 }
 
 fn nonnegative_number(value: &str) -> Option<f32> {
@@ -576,9 +695,9 @@ fn flex_gap(value: &str, em_px: f32) -> Option<(f32, f32)> {
     .filter(|(row, column)| *row >= 0.0 && *column >= 0.0)
 }
 
-fn apply_border(style: &mut ComputedStyle, declarations: &BTreeMap<&str, CascadeWinner<'_>>) {
+fn apply_border(style: &mut ComputedStyle, declarations: &BTreeMap<String, CascadeWinner>) {
     let shorthand = declarations.get("border").and_then(|winner| {
-        parse_border(winner.4, style.font_size_px).map(|border| (winner, border))
+        parse_border(&winner.4, style.font_size_px).map(|border| (winner, border))
     });
     let width = declarations.get("border-width");
     if let Some((winner, border)) = shorthand.as_ref()
@@ -591,7 +710,7 @@ fn apply_border(style: &mut ComputedStyle, declarations: &BTreeMap<&str, Cascade
             .as_ref()
             .is_none_or(|(winner, _)| cascade_rank(width) > cascade_rank(winner))
     {
-        style.border_px = absolute_length(width.4, style.font_size_px).unwrap_or(style.border_px);
+        style.border_px = absolute_length(&width.4, style.font_size_px).unwrap_or(style.border_px);
     }
 
     let color = declarations.get("border-color");
@@ -609,11 +728,11 @@ fn apply_border(style: &mut ComputedStyle, declarations: &BTreeMap<&str, Cascade
             .as_ref()
             .is_none_or(|(winner, _)| cascade_rank(color) > cascade_rank(winner))
     {
-        style.border_color = Some(color.4.to_owned());
+        style.border_color = Some(color.4.clone());
     }
 }
 
-fn cascade_rank(winner: &CascadeWinner<'_>) -> (bool, Specificity, usize, usize) {
+fn cascade_rank(winner: &CascadeWinner) -> (bool, Specificity, usize, usize) {
     (winner.0, winner.1, winner.2, winner.3)
 }
 
@@ -1032,5 +1151,77 @@ mod tests {
         let item = style_for("div");
         assert!((item.flex_grow - 2.0).abs() < f32::EPSILON);
         assert!((item.flex_shrink - 0.5).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn resolves_inherited_custom_properties_and_fallbacks() {
+        let document = parse_html(
+            "<html><body><main><p class='primary'>one</p><p class='fallback'>two</p></main></body></html>",
+        );
+        let styled = style_document(
+            &document,
+            &parse(
+                ":root { --brand: #2468ac; --cycle: var(--cycle) } \
+                 main { --brand: #c53030 } \
+                 .primary { color: var(--brand) } \
+                 .fallback { color: var(--cycle, green); margin-left: var(--space, 12px) }",
+            ),
+        );
+        let style_for = |class: &str| {
+            let id = document
+                .descendants(document.root())
+                .find(|node| matches!(&node.kind, NodeKind::Element(element) if element.attribute("class") == Some(class)))
+                .unwrap()
+                .id;
+            &styled.iter().find(|node| node.node_id == id).unwrap().style
+        };
+        assert_eq!(style_for("primary").color.as_deref(), Some("#c53030"));
+        assert_eq!(style_for("fallback").color.as_deref(), Some("green"));
+        assert!((style_for("fallback").margin.left - 12.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn applies_media_rules_for_the_actual_viewport() {
+        let document = parse_html("<main>responsive</main>");
+        let stylesheet = parse(
+            "main { color: red } \
+             @media (min-width: 768px) { main { color: blue; display: flex } }",
+        );
+        let narrow = style_document_for_viewport(&document, &stylesheet, 320.0);
+        let wide = style_document_for_viewport(&document, &stylesheet, 1280.0);
+        let main_style = |styled: &[StyledNode]| {
+            styled
+                .iter()
+                .find(|node| matches!(&document.node(node.node_id).unwrap().kind, NodeKind::Element(element) if element.name == "main"))
+                .unwrap()
+                .style
+                .clone()
+        };
+        assert_eq!(main_style(&narrow).color.as_deref(), Some("red"));
+        assert_eq!(main_style(&narrow).display, Display::Block);
+        assert_eq!(main_style(&wide).color.as_deref(), Some("blue"));
+        assert_eq!(main_style(&wide).display, Display::Flex);
+    }
+
+    #[test]
+    fn computes_flex_item_and_positioning_properties() {
+        let document = parse_html("<main><div>item</div></main>");
+        let styled = style_document(
+            &document,
+            &parse(
+                "div { flex-basis: 25%; order: -2; position: absolute; \
+                 top: 10px; right: 5%; z-index: 4 }",
+            ),
+        );
+        let item = styled
+            .iter()
+            .find(|node| matches!(&document.node(node.node_id).unwrap().kind, NodeKind::Element(element) if element.name == "div"))
+            .unwrap();
+        assert_eq!(item.style.flex_basis, Some(ComputedLength::Percent(0.25)));
+        assert_eq!(item.style.order, -2);
+        assert_eq!(item.style.position, Position::Absolute);
+        assert_eq!(item.style.top, Some(ComputedLength::Px(10.0)));
+        assert_eq!(item.style.right, Some(ComputedLength::Percent(0.05)));
+        assert_eq!(item.style.z_index, 4);
     }
 }
