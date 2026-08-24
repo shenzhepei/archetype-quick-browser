@@ -48,6 +48,11 @@ page through the rendering pipeline without opening a window:
 cargo run -p arch-browser -- --inspect fixtures/pages/05-image/index.html
 ```
 
+The application writes newline-delimited JSON diagnostics to
+`<application-support>/Archetype/logs/archetype.jsonl`. Logs remain local and the application does
+not collect or upload telemetry. Set `ARCHETYPE_DATA_DIR` to isolate both the profile and logs in a
+custom directory during development or testing.
+
 ## Verify
 
 ```bash
@@ -90,6 +95,7 @@ The scoped product requirements and detailed implementation plans are in:
   images, backgrounds, and borders; text color, font family, weight, style, alignment, line height,
   white-space, and overflow clipping; constrained document, stylesheet, PNG, and JPEG loading with
   image fallbacks; classified error pages; SQLite Space/Page persistence with corrupt-profile recovery;
+  local structured JSONL diagnostics without telemetry;
   global tab persistence, hierarchical Space bookmark storage and root bookmark bar, navigation identity,
   redirects, links, and history; 12 of the planned 30 deterministic fixtures with a corpus-wide
   render test.

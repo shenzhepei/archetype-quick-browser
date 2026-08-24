@@ -5,7 +5,6 @@ use arch_net::{LoadError, LoadErrorKind};
 use arch_paint::{DisplayCommand, PaintColor};
 use arch_store::{Bookmark, BookmarkKind, Page, Space};
 use arch_style::{FontStyle as PageFontStyle, FontWeight as PageFontWeight, TextAlign};
-use directories::ProjectDirs;
 use gpui::{
     AnyElement, AppContext as _, Application, AssetSource, Context, Entity, FontWeight,
     InteractiveElement as _, IntoElement, ParentElement, Render, SharedString,
@@ -23,7 +22,10 @@ use gpui_component::{
 };
 use url::Url;
 
-use crate::i18n::Language;
+use crate::{
+    i18n::Language,
+    logging::{self, Level},
+};
 
 struct Assets;
 
@@ -228,6 +230,14 @@ impl QuickBrowser {
         let language = Language::system();
         let profile = profile_path();
         let mut core = BrowserCore::open(&profile).unwrap_or_else(|error| {
+            logging::event(
+                Level::Error,
+                "profile_fallback",
+                [
+                    ("path", serde_json::json!(profile)),
+                    ("error", serde_json::json!(error.to_string())),
+                ],
+            );
             eprintln!("profile unavailable at {}: {error}", profile.display());
             BrowserCore::in_memory().expect("in-memory profile must initialize")
         });
@@ -530,9 +540,26 @@ impl QuickBrowser {
             .selected_page_record()
             .cloned()
             .expect("page was created");
+        logging::event(
+            Level::Info,
+            "navigation_started",
+            [
+                ("page_id", serde_json::json!(&page.id)),
+                ("url", serde_json::json!(url.as_str())),
+            ],
+        );
         match self.core.navigate(&page, url, 960.0) {
             Ok(rendered) => self.apply_rendered(&page, rendered, window, cx),
             Err(error) => {
+                logging::event(
+                    Level::Error,
+                    "navigation_failed",
+                    [
+                        ("page_id", serde_json::json!(&page.id)),
+                        ("url", serde_json::json!(url.as_str())),
+                        ("error", serde_json::json!(format!("{error:#}"))),
+                    ],
+                );
                 self.error = Some(ErrorView::navigation(self.language, &error));
                 cx.notify();
             }
@@ -557,6 +584,15 @@ impl QuickBrowser {
         match result {
             Ok(rendered) => self.apply_rendered(&page, rendered, window, cx),
             Err(error) => {
+                logging::event(
+                    Level::Error,
+                    "history_navigation_failed",
+                    [
+                        ("page_id", serde_json::json!(&page.id)),
+                        ("direction", serde_json::json!(direction.as_str())),
+                        ("error", serde_json::json!(format!("{error:#}"))),
+                    ],
+                );
                 self.error = Some(ErrorView::navigation(self.language, &error));
                 cx.notify();
             }
@@ -570,6 +606,33 @@ impl QuickBrowser {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        logging::event(
+            Level::Info,
+            "navigation_completed",
+            [
+                ("page_id", serde_json::json!(&page.id)),
+                ("url", serde_json::json!(rendered.final_url.as_str())),
+                ("title", serde_json::json!(&rendered.title)),
+                (
+                    "display_command_count",
+                    serde_json::json!(rendered.display_list.commands.len()),
+                ),
+                (
+                    "diagnostic_count",
+                    serde_json::json!(rendered.diagnostics.len()),
+                ),
+            ],
+        );
+        for diagnostic in &rendered.diagnostics {
+            logging::event(
+                Level::Warn,
+                "render_diagnostic",
+                [
+                    ("page_id", serde_json::json!(&page.id)),
+                    ("message", serde_json::json!(diagnostic)),
+                ],
+            );
+        }
         self.set_address(rendered.final_url.to_string(), window, cx);
         if let Some(current) = self.pages.iter_mut().find(|item| item.id == page.id) {
             current.url = rendered.final_url.to_string();
@@ -1427,11 +1490,18 @@ enum HistoryDirection {
     Reload,
 }
 
+impl HistoryDirection {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::Back => "back",
+            Self::Forward => "forward",
+            Self::Reload => "reload",
+        }
+    }
+}
+
 fn profile_path() -> PathBuf {
-    let base = ProjectDirs::from("org", "Archetype", "Archetype")
-        .map_or_else(std::env::temp_dir, |dirs| {
-            dirs.data_local_dir().to_path_buf()
-        });
+    let base = logging::data_dir();
     let _ = std::fs::create_dir_all(&base);
     base.join("profile.db")
 }

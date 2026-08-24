@@ -46,6 +46,10 @@ cargo run -p arch-browser
 cargo run -p arch-browser -- --inspect fixtures/pages/05-image/index.html
 ```
 
+应用会将换行分隔的 JSON 诊断日志写入
+`<应用支持目录>/Archetype/logs/archetype.jsonl`。日志仅保存在本地，应用不会收集或上传遥测。
+开发或测试时可设置 `ARCHETYPE_DATA_DIR`，将配置与日志隔离到指定目录。
+
 ## 验证
 
 ```bash
@@ -86,7 +90,8 @@ cargo llvm-cov --workspace --lcov --output-path coverage/lcov.info
   DOM 与 HTML 解析；初步的 CSS 解析器和层叠；递归块盒与行内文本；支持定位文本、图片、
   背景和边框的可序列化显示列表；文本颜色、字体族、字重、样式、对齐、行高、空白处理和
   溢出裁剪；受限的文档、样式表、PNG 与 JPEG 加载和图片回退；分类错误页面；支持损坏配置恢复的 SQLite
-  空间与页面持久化；全局标签页持久化、分层空间书签存储和根书签栏、导航标识、重定向、
+  空间与页面持久化；不含遥测的本地结构化 JSONL 诊断日志；
+  全局标签页持久化、分层空间书签存储和根书签栏、导航标识、重定向、
   链接与历史；规划 30 个、当前完成 12 个且带有全语料渲染测试的确定性测试页面。
 - 待实现：完善 CSS/布局支持矩阵，将语料扩展至 30 个测试页面，改进字体塑形与链接交互，
   增加截图回归和模糊测试，记录性能基线并收集发布验收证据。
