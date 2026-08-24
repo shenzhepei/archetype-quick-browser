@@ -35,6 +35,15 @@ pub struct RenderedPage {
     pub diagnostics: Vec<String>,
     pub image_resources: HashMap<String, Vec<u8>>,
     pub forms: Vec<FormState>,
+    pub form_controls: Vec<PositionedFormControl>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PositionedFormControl {
+    pub form_index: usize,
+    pub control_id: ControlId,
+    pub bounds: arch_layout::Rect,
+    pub clip: Option<arch_layout::Rect>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -770,6 +779,31 @@ fn render_document(
     let links = link_targets(document, url);
     let layout = arch_layout::layout(document, &styled, viewport_width, images, &links);
     let display_list = arch_paint::paint(&layout);
+    let forms = extract_forms(document, url);
+    let form_by_control: HashMap<_, _> = forms
+        .iter()
+        .enumerate()
+        .flat_map(|(form_index, form)| {
+            form.controls
+                .iter()
+                .map(move |control| (control.id, form_index))
+        })
+        .collect();
+    let form_controls = layout
+        .boxes
+        .iter()
+        .filter_map(|layout_box| {
+            let control_id = ControlId(layout_box.node_id.0);
+            form_by_control
+                .get(&control_id)
+                .map(|form_index| PositionedFormControl {
+                    form_index: *form_index,
+                    control_id,
+                    bounds: layout_box.bounds,
+                    clip: layout_box.clip,
+                })
+        })
+        .collect();
     let mut diagnostics = stylesheet.diagnostics;
     diagnostics.extend(document_diagnostics(document));
     RenderedPage {
@@ -778,7 +812,8 @@ fn render_document(
         display_list,
         diagnostics,
         image_resources: HashMap::new(),
-        forms: extract_forms(document, url),
+        forms,
+        form_controls,
     }
 }
 
@@ -1683,6 +1718,16 @@ mod tests {
         assert_eq!(form.action.as_str(), "https://example.com/submit");
         assert_eq!(form.method, FormMethod::Post);
         assert_eq!(form.controls.len(), 8);
+        assert_eq!(page.form_controls.len(), form.controls.len());
+        assert!(page.form_controls.iter().all(|positioned| {
+            positioned.form_index == 0
+                && form
+                    .controls
+                    .iter()
+                    .any(|control| control.id == positioned.control_id)
+                && positioned.bounds.width > 0.0
+                && positioned.bounds.height > 0.0
+        }));
         let submitter = form
             .controls
             .iter()

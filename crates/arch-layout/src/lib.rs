@@ -121,14 +121,20 @@ impl<S: BuildHasher> LayoutContext<'_, S> {
             _ => None,
         };
         let image = self.images.get(&node.id).cloned();
-        let creates_box = style.display == Display::Block || text.is_some() || image.is_some();
+        let form_dimensions = form_control_dimensions(&node.kind);
+        let creates_box = style.display == Display::Block
+            || text.is_some()
+            || image.is_some()
+            || form_dimensions.is_some();
         if creates_box {
             let horizontal_edges = style.padding.left + style.padding.right + style.border_px * 2.0;
             let vertical_edges = style.padding.top + style.padding.bottom + style.border_px * 2.0;
             let width = resolve_box_width(style, containing_width);
             let content_width = (width - horizontal_edges).max(0.0);
-            let own_content_height =
-                intrinsic_content_height(style, image.as_ref(), text.as_deref(), content_width);
+            let own_content_height = form_dimensions.map_or_else(
+                || intrinsic_content_height(style, image.as_ref(), text.as_deref(), content_width),
+                |(_, height)| height,
+            );
             let x = containing_x + style.margin.left;
             let y = *cursor_y + style.margin.top;
             let box_index = self.tree.boxes.len();
@@ -288,12 +294,15 @@ impl<S: BuildHasher> LayoutContext<'_, S> {
             _ => None,
         };
         let image = self.images.get(&node_id).cloned();
-        if text.is_some() || image.is_some() {
+        let form_dimensions = form_control_dimensions(&node.kind);
+        if text.is_some() || image.is_some() || form_dimensions.is_some() {
             let intrinsic_width = if let Some(value) = &text {
                 let count = u16::try_from(value.chars().count()).unwrap_or(u16::MAX);
                 f32::from(count) * style.font_size_px * 0.55
             } else if let Some(image) = &image {
                 pixel_dimension(image.intrinsic_width)
+            } else if let Some((width, _)) = form_dimensions {
+                width
             } else {
                 0.0
             };
@@ -314,6 +323,8 @@ impl<S: BuildHasher> LayoutContext<'_, S> {
             } else if let Some(image) = &image {
                 let width = pixel_dimension(image.intrinsic_width.max(1));
                 pixel_dimension(image.intrinsic_height) * (run_width / width).min(1.0)
+            } else if let Some((_, height)) = form_dimensions {
+                height
             } else {
                 style.line_height_px
             };
@@ -355,6 +366,34 @@ impl<S: BuildHasher> LayoutContext<'_, S> {
                 line_height,
             );
         }
+    }
+}
+
+fn form_control_dimensions(kind: &NodeKind) -> Option<(f32, f32)> {
+    let NodeKind::Element(element) = kind else {
+        return None;
+    };
+    match element.name.as_str() {
+        "select" | "button" => Some((
+            if element.name == "button" {
+                96.0
+            } else {
+                180.0
+            },
+            30.0,
+        )),
+        "input" => match element
+            .attribute("type")
+            .unwrap_or("text")
+            .to_ascii_lowercase()
+            .as_str()
+        {
+            "checkbox" | "radio" => Some((18.0, 18.0)),
+            "text" | "password" => Some((180.0, 30.0)),
+            "submit" | "button" => Some((96.0, 30.0)),
+            _ => None,
+        },
+        _ => None,
     }
 }
 
@@ -717,5 +756,37 @@ mod tests {
         assert!(find("abcdefghijklmnopqrstuvwxyz").bounds.height > 16.0 * 1.4);
         assert!((find("centered").bounds.width - 80.0).abs() < f32::EPSILON);
         assert!((find("one\ntwo\nthree").bounds.height - 16.0 * 1.4 * 3.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn gives_supported_form_controls_stable_nonzero_boxes() {
+        let document = parse_html(
+            "<form><input id='text'><input id='password' type='password'>\
+             <input id='checkbox' type='checkbox'><input id='radio' type='radio'>\
+             <select id='select'><option>One</option></select>\
+             <input id='submit' type='submit'><button id='button' type='button'>Button</button></form>",
+        );
+        let styled = style_document(&document, &parse_css(""));
+        let tree = layout(&document, &styled, 800.0, &HashMap::new(), &HashMap::new());
+
+        let controls: Vec<_> = tree
+            .boxes
+            .iter()
+            .filter(|layout_box| {
+                document.node(layout_box.node_id).is_some_and(|node| {
+                    matches!(&node.kind, NodeKind::Element(element) if
+                        matches!(element.name.as_str(), "input" | "select" | "button"))
+                })
+            })
+            .collect();
+        assert_eq!(controls.len(), 7);
+        assert!(
+            controls
+                .iter()
+                .all(|control| { control.bounds.width > 0.0 && control.bounds.height > 0.0 })
+        );
+        assert!((controls[0].bounds.width - 180.0).abs() < f32::EPSILON);
+        assert!((controls[2].bounds.width - 18.0).abs() < f32::EPSILON);
+        assert!((controls[5].bounds.width - 96.0).abs() < f32::EPSILON);
     }
 }
