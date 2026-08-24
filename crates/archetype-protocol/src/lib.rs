@@ -7,7 +7,7 @@ use arch_paint::DisplayList;
 use archetype_types::{ArchetypeUrl, NavigationId, PageId};
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{Value, value::RawValue};
 use thiserror::Error;
 
 pub const MAGIC: &str = "ARCH";
@@ -491,7 +491,7 @@ struct WireEnvelope {
     kind: String,
     request_id: u64,
     payload_length: u64,
-    payload: Value,
+    payload: Box<RawValue>,
 }
 
 fn encode_body(envelope: &Envelope) -> Result<Vec<u8>, ProtocolError> {
@@ -513,7 +513,7 @@ fn decode_body(body: &[u8]) -> Result<Envelope, ProtocolError> {
     if wire.magic != MAGIC {
         return Err(ProtocolError::InvalidMagic(wire.magic));
     }
-    let actual_payload_length = serde_json::to_vec(&wire.payload)?.len();
+    let actual_payload_length = wire.payload.get().len();
     if wire.payload_length != actual_payload_length as u64 {
         return Err(ProtocolError::PayloadLengthMismatch {
             declared: wire.payload_length,
@@ -524,7 +524,7 @@ fn decode_body(body: &[u8]) -> Result<Envelope, ProtocolError> {
         wire.protocol_major,
         wire.protocol_minor,
         wire.request_id,
-        Message::from_wire(&wire.kind, wire.payload)?,
+        Message::from_wire(&wire.kind, serde_json::from_str(wire.payload.get())?)?,
     ))
 }
 
@@ -593,6 +593,31 @@ mod tests {
                 envelope
             );
         }
+    }
+
+    #[test]
+    fn codec_validates_original_payload_bytes_with_layout_floats() {
+        let envelope = Envelope::v4(
+            9,
+            Message::Response(Response::Rendered {
+                page_id: PageId::new(),
+                navigation_id: NavigationId::zero().saturating_next(),
+                final_url: "https://example.test/floats".parse().unwrap(),
+                title: "Rust UI neutral / 框架无关".to_owned(),
+                display_list: DisplayList {
+                    commands: Vec::new(),
+                    content_height: 123.456_78,
+                },
+                diagnostics: Vec::new(),
+            }),
+        );
+
+        assert_eq!(
+            Codec::default()
+                .decode(encoded(&envelope).as_slice())
+                .unwrap(),
+            envelope
+        );
     }
 
     #[test]

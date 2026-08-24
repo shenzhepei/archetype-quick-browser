@@ -62,6 +62,7 @@ pub struct StaticDocument {
 }
 
 impl StaticDocument {
+    #[must_use]
     pub fn protocol_envelope(&self, request_id: u64) -> Envelope {
         Envelope::v4(
             request_id,
@@ -397,7 +398,10 @@ impl RuntimeConnection {
         Ok(())
     }
 
-    fn drain_responses(&mut self, responses: &Receiver<ReaderEvent>) -> bool {
+    fn drain_responses(
+        &mut self,
+        responses: &Receiver<ReaderEvent>,
+    ) -> Result<(), RuntimeProcessError> {
         drain_responses(responses, &mut self.pending, &mut self.in_flight_bytes)
     }
 
@@ -455,8 +459,14 @@ fn supervise(
         let mut forced_restart = None;
         let mut command_channel_closed = false;
         loop {
-            if !connection.drain_responses(&responses) || connection.expire_requests() {
-                connection.fail_pending(&RuntimeProcessError::RuntimeDisconnected);
+            if let Err(error) = connection.drain_responses(&responses) {
+                terminal_error = error.clone();
+                connection.fail_pending(&error);
+                break;
+            }
+            if connection.expire_requests() {
+                terminal_error = RuntimeProcessError::RequestTimedOut;
+                connection.fail_pending(&terminal_error);
                 break;
             }
             if last_resource_sample.elapsed() >= RESOURCE_SAMPLE_INTERVAL {
@@ -698,11 +708,12 @@ fn drain_responses(
     responses: &Receiver<ReaderEvent>,
     pending: &mut BTreeMap<u64, PendingRender>,
     in_flight_bytes: &mut usize,
-) -> bool {
+) -> Result<(), RuntimeProcessError> {
     for event in responses.try_iter() {
         let envelope = match event {
             ReaderEvent::Envelope(envelope) => envelope,
-            ReaderEvent::Authenticated | ReaderEvent::Failed(_) => return false,
+            ReaderEvent::Authenticated => return Err(RuntimeProcessError::UnexpectedResponse),
+            ReaderEvent::Failed(error) => return Err(RuntimeProcessError::Protocol(error)),
         };
         let Some(request) = pending.remove(&envelope.request_id()) else {
             continue;
@@ -735,7 +746,7 @@ fn drain_responses(
         };
         let _ = request.completion.send(result);
     }
-    true
+    Ok(())
 }
 
 fn expire_requests(
