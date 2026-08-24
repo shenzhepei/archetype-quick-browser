@@ -106,6 +106,7 @@ cargo llvm-cov --workspace --lcov --output-path coverage/lcov.info
 | Crate | 职责 |
 | --- | --- |
 | `archetype-types`、`archetype-protocol` | 稳定值对象、分帧 IPC、协商、路由和有界 transport |
+| `archetype-runtime` | 静态文档 Renderer 子进程与分帧命令循环 |
 | `arch-browser` | 桌面外壳、编排、本地化和渲染集成 |
 | `arch-html`、`arch-dom` | HTML 解析和文档表示 |
 | `arch-css`、`arch-style` | CSS 解析、层叠和计算样式 |
@@ -139,10 +140,12 @@ cargo llvm-cov --workspace --lcov --output-path coverage/lcov.info
 
 ## V4 开发进度
 
-- 稳定类型与协议原型切片已经完成：UUID V7 页面 ID、单调导航 ID、经过验证的 URL 值对象、
-  版本化长度前缀 JSON codec、能力协商、有界内存 transport、请求路由、取消、超时、背压和协议模糊测试。
-- 下一实施切片是独立 Renderer Runtime 进程。只有进程隔离、macOS 沙箱、资源 broker、会话能力、
-  Flexbox、休眠和发布验收全部满足配对规范后，V4 才算完成。
+- 稳定类型、协议原型与 C1 子进程切片已经完成：UUID V7 页面 ID、单调导航 ID、经过验证的 URL
+  值对象、版本化长度前缀 JSON codec、能力协商、有界内存 transport、请求路由、取消、超时、背压、
+  协议模糊测试，以及真实 Renderer Runtime 握手、静态文档渲染、DisplayList 返回、异步 Browser
+  监督、结构化断连和 20 轮子进程终止测试。
+- 子进程路径尚未成为桌面应用的默认导航路径，也不等同于安全沙箱。下一切片是 C2 资源 broker。
+  只有桌面集成、macOS 沙箱、会话能力、Flexbox、休眠和发布验收全部满足配对规范后，V4 才算完成。
 
 ## 许可证
 

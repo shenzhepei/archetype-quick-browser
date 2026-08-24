@@ -111,6 +111,7 @@ The workspace separates browser concerns into focused crates:
 | Crate | Responsibility |
 | --- | --- |
 | `archetype-types`, `archetype-protocol` | Stable values, framed IPC, negotiation, routing, and bounded transports |
+| `archetype-runtime` | Static document renderer subprocess and framed command loop |
 | `arch-browser` | Desktop shell, orchestration, localization, and rendering integration |
 | `arch-html`, `arch-dom` | HTML parsing and document representation |
 | `arch-css`, `arch-style` | CSS parsing, cascade, and computed style |
@@ -148,13 +149,16 @@ The scoped product requirements and detailed implementation plans are in:
 
 ## V4 Development
 
-- The stable type and protocol prototype slices are complete: UUID V7 page IDs, monotonic
+- The stable type, protocol, and C1 subprocess slices are complete: UUID V7 page IDs, monotonic
   navigation IDs, validated URL values, a versioned length-prefixed JSON codec, capability
   negotiation, bounded in-memory transport, request routing, cancellation, timeout handling,
-  backpressure, and protocol fuzzing.
-- The next implementation slice is the independent Renderer Runtime process. V4 is not complete
-  until process isolation, the macOS sandbox, brokered resources, session features, Flexbox,
-  hibernation, and release acceptance all pass the paired specification.
+  backpressure, protocol fuzzing, a real Renderer Runtime handshake, static document rendering,
+  display-list return, asynchronous Browser supervision, structured disconnects, and a 20-cycle
+  subprocess termination test.
+- The subprocess path is not yet the desktop application's default navigation path and is not a
+  security sandbox. The next slice is C2 brokered resource transfer. V4 remains incomplete until
+  desktop integration, the macOS sandbox, session features, Flexbox, hibernation, and release
+  acceptance all pass the paired specification.
 
 ## License
 
