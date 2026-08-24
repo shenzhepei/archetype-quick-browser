@@ -118,6 +118,7 @@ dependencies = [
  "cosmic-text",
  "directories",
  "fontdb 0.16.2",
+ "getrandom 0.3.4",
  "gpui",
  "gpui-component",
  "gpui-component-assets",

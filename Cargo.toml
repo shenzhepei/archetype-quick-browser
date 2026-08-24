@@ -29,6 +29,7 @@ base64 = "0.22"
 cssparser = "0.37"
 cosmic-text = "0.14.2"
 fontdb = "0.16.2"
+getrandom = "0.3"
 html5ever = "0.35"
 gpui = { version = "0.2.2", features = ["runtime_shaders"] }
 gpui-component = "0.5.1"

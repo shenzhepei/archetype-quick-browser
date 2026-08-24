@@ -1,6 +1,6 @@
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap},
-    io::Write,
+    io::{Read, Write},
     path::Path,
     process::{Child, ChildStdin, Command, Stdio},
     sync::{
@@ -20,6 +20,8 @@ use archetype_protocol::{
 use archetype_types::{ArchetypeUrl, NavigationId, PageId};
 use thiserror::Error;
 
+const LAUNCH_AUTH_MAGIC: [u8; 4] = *b"ARUN";
+const LAUNCH_TOKEN_BYTES: usize = 32;
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
 const COMMAND_QUEUE_LIMIT: usize = 256;
@@ -193,6 +195,7 @@ enum SupervisorCommand {
 }
 
 enum ReaderEvent {
+    Authenticated,
     Envelope(Envelope),
     Failed(String),
 }
@@ -313,7 +316,7 @@ fn start_child(
         .stderr(Stdio::inherit())
         .spawn()
         .map_err(|error| RuntimeProcessError::Spawn(error.to_string()))?;
-    let input = child
+    let mut input = child
         .stdin
         .take()
         .ok_or_else(|| RuntimeProcessError::Spawn("runtime stdin was not piped".to_owned()))?;
@@ -321,10 +324,34 @@ fn start_child(
         .stdout
         .take()
         .ok_or_else(|| RuntimeProcessError::Spawn("runtime stdout was not piped".to_owned()))?;
+    let mut launch_token = [0_u8; LAUNCH_TOKEN_BYTES];
+    getrandom::fill(&mut launch_token)
+        .map_err(|error| RuntimeProcessError::Spawn(error.to_string()))?;
+    input
+        .write_all(&LAUNCH_AUTH_MAGIC)
+        .and_then(|()| input.write_all(&launch_token))
+        .and_then(|()| input.flush())
+        .map_err(|error| RuntimeProcessError::Protocol(error.to_string()))?;
     let (response_sender, response_receiver) = mpsc::channel();
     let reader = thread::Builder::new()
         .name("archetype-runtime-reader".to_owned())
         .spawn(move || {
+            let mut authentication = [0_u8; LAUNCH_AUTH_MAGIC.len() + LAUNCH_TOKEN_BYTES];
+            if let Err(error) = output.read_exact(&mut authentication) {
+                let _ = response_sender.send(ReaderEvent::Failed(error.to_string()));
+                return;
+            }
+            if authentication[..LAUNCH_AUTH_MAGIC.len()] != LAUNCH_AUTH_MAGIC
+                || authentication[LAUNCH_AUTH_MAGIC.len()..] != launch_token
+            {
+                let _ = response_sender.send(ReaderEvent::Failed(
+                    "runtime launch authentication mismatch".to_owned(),
+                ));
+                return;
+            }
+            if response_sender.send(ReaderEvent::Authenticated).is_err() {
+                return;
+            }
             let codec = Codec::default();
             loop {
                 match codec.decode(&mut output) {
@@ -351,6 +378,15 @@ fn perform_handshake(
     input: &mut ChildStdin,
     responses: &Receiver<ReaderEvent>,
 ) -> Result<(), RuntimeProcessError> {
+    match responses.recv_timeout(HANDSHAKE_TIMEOUT) {
+        Ok(ReaderEvent::Authenticated) => {}
+        Ok(ReaderEvent::Failed(error)) => return Err(RuntimeProcessError::Protocol(error)),
+        Ok(ReaderEvent::Envelope(_)) => return Err(RuntimeProcessError::UnexpectedResponse),
+        Err(RecvTimeoutError::Timeout) => return Err(RuntimeProcessError::HandshakeTimeout),
+        Err(RecvTimeoutError::Disconnected) => {
+            return Err(RuntimeProcessError::RuntimeDisconnected);
+        }
+    }
     let capabilities = BTreeSet::from([
         Capability::static_document(),
         Capability::display_list_v1(),
@@ -391,7 +427,9 @@ fn perform_handshake(
             )),
             _ => Err(RuntimeProcessError::UnexpectedResponse),
         },
-        ReaderEvent::Envelope(_) => Err(RuntimeProcessError::UnexpectedResponse),
+        ReaderEvent::Authenticated | ReaderEvent::Envelope(_) => {
+            Err(RuntimeProcessError::UnexpectedResponse)
+        }
         ReaderEvent::Failed(error) => Err(RuntimeProcessError::Protocol(error)),
     }
 }
@@ -410,8 +448,9 @@ fn drain_responses(
     pending: &mut BTreeMap<u64, PendingRender>,
 ) -> bool {
     for event in responses.try_iter() {
-        let ReaderEvent::Envelope(envelope) = event else {
-            return false;
+        let envelope = match event {
+            ReaderEvent::Envelope(envelope) => envelope,
+            ReaderEvent::Authenticated | ReaderEvent::Failed(_) => return false,
         };
         let Some(request) = pending.remove(&envelope.request_id()) else {
             continue;

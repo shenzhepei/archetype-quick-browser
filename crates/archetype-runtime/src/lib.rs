@@ -12,12 +12,44 @@ use archetype_protocol::{
 use thiserror::Error;
 use url::Url;
 
+pub const LAUNCH_AUTH_MAGIC: [u8; 4] = *b"ARUN";
+pub const LAUNCH_TOKEN_BYTES: usize = 32;
+
 #[derive(Debug, Error)]
 pub enum RuntimeError {
     #[error(transparent)]
     Protocol(#[from] ProtocolError),
     #[error("runtime output flush failed: {0}")]
     Flush(#[source] io::Error),
+    #[error("runtime launch authentication failed")]
+    LaunchAuthentication,
+}
+
+/// Authenticates the inherited pipe before serving the renderer protocol.
+///
+/// # Errors
+/// Returns an error when the one-time launch challenge is missing, invalid, or cannot be echoed.
+pub fn serve_authenticated(
+    mut input: impl Read,
+    mut output: impl Write,
+) -> Result<(), RuntimeError> {
+    let mut challenge = [0_u8; LAUNCH_TOKEN_BYTES];
+    let mut magic = [0_u8; LAUNCH_AUTH_MAGIC.len()];
+    input
+        .read_exact(&mut magic)
+        .map_err(|_| RuntimeError::LaunchAuthentication)?;
+    input
+        .read_exact(&mut challenge)
+        .map_err(|_| RuntimeError::LaunchAuthentication)?;
+    if magic != LAUNCH_AUTH_MAGIC || challenge.iter().all(|byte| *byte == 0) {
+        return Err(RuntimeError::LaunchAuthentication);
+    }
+    output
+        .write_all(&LAUNCH_AUTH_MAGIC)
+        .and_then(|()| output.write_all(&challenge))
+        .map_err(RuntimeError::Flush)?;
+    output.flush().map_err(RuntimeError::Flush)?;
+    serve(input, output)
 }
 
 /// Serves one renderer connection until shutdown or input EOF.
@@ -519,5 +551,38 @@ mod tests {
             command,
             arch_paint::DisplayCommand::Image { loaded: true, .. }
         )));
+    }
+
+    #[test]
+    fn authenticated_server_echoes_a_nonzero_pipe_challenge() {
+        let challenge = [7_u8; LAUNCH_TOKEN_BYTES];
+        let mut input = Vec::from(LAUNCH_AUTH_MAGIC);
+        input.extend_from_slice(&challenge);
+        input.extend_from_slice(&encode(&[hello()]));
+        let mut output = Vec::new();
+
+        serve_authenticated(input.as_slice(), &mut output).unwrap();
+
+        assert_eq!(&output[..LAUNCH_AUTH_MAGIC.len()], &LAUNCH_AUTH_MAGIC);
+        assert_eq!(
+            &output[LAUNCH_AUTH_MAGIC.len()..LAUNCH_AUTH_MAGIC.len() + LAUNCH_TOKEN_BYTES],
+            &challenge
+        );
+        let protocol = &output[LAUNCH_AUTH_MAGIC.len() + LAUNCH_TOKEN_BYTES..];
+        assert!(matches!(
+            Codec::default().decode(protocol).unwrap().message(),
+            Message::ServerHello(_)
+        ));
+    }
+
+    #[test]
+    fn authenticated_server_rejects_a_zero_challenge() {
+        let mut input = Vec::from(LAUNCH_AUTH_MAGIC);
+        input.extend_from_slice(&[0_u8; LAUNCH_TOKEN_BYTES]);
+
+        assert!(matches!(
+            serve_authenticated(input.as_slice(), Vec::new()),
+            Err(RuntimeError::LaunchAuthentication)
+        ));
     }
 }
