@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::{BTreeMap, BTreeSet, HashMap},
     io::Write,
     path::Path,
     process::{Child, ChildStdin, Command, Stdio},
@@ -14,7 +14,8 @@ use std::{
 
 use arch_paint::DisplayList;
 use archetype_protocol::{
-    Capability, ClientHello, Codec, Envelope, Message, PROTOCOL_MINOR, Request, Response,
+    BrokeredResource, Capability, ClientHello, Codec, Envelope, Message, PROTOCOL_MINOR, Request,
+    ResourceKind, Response,
 };
 use archetype_types::{ArchetypeUrl, NavigationId, PageId};
 use thiserror::Error;
@@ -32,6 +33,8 @@ pub struct StaticDocument {
     pub url: ArchetypeUrl,
     pub html: String,
     pub viewport_width_px: u32,
+    pub resources: Vec<BrokeredResource>,
+    pub broker_diagnostics: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -42,6 +45,7 @@ pub struct RuntimeRenderedPage {
     pub title: String,
     pub display_list: DisplayList,
     pub diagnostics: Vec<String>,
+    pub image_resources: HashMap<String, Vec<u8>>,
 }
 
 #[derive(Clone, Debug, Eq, Error, PartialEq)]
@@ -181,6 +185,8 @@ struct PendingRender {
     deadline: Instant,
     page_id: PageId,
     navigation_id: NavigationId,
+    broker_diagnostics: Vec<String>,
+    image_resources: HashMap<String, Vec<u8>>,
     completion: SyncSender<Result<RuntimeRenderedPage, RuntimeProcessError>>,
 }
 
@@ -236,6 +242,7 @@ fn supervise(
                         url: document.url,
                         html: document.html,
                         viewport_width_px: document.viewport_width_px,
+                        resources: document.resources.clone(),
                     }),
                 );
                 if let Err(error) = write_envelope(&mut input, &envelope) {
@@ -250,6 +257,15 @@ fn supervise(
                         deadline: Instant::now() + REQUEST_TIMEOUT,
                         page_id: document.page_id,
                         navigation_id: document.navigation_id,
+                        broker_diagnostics: document.broker_diagnostics,
+                        image_resources: document
+                            .resources
+                            .into_iter()
+                            .filter(|resource| resource.kind == ResourceKind::Image)
+                            .map(|resource| {
+                                (resource.requested_url.to_string(), resource.body.into_vec())
+                            })
+                            .collect(),
                         completion,
                     },
                 );
@@ -397,8 +413,9 @@ fn drain_responses(
                 final_url,
                 title,
                 display_list,
-                diagnostics,
+                mut diagnostics,
             }) if page_id == request.page_id && navigation_id == request.navigation_id => {
+                diagnostics.splice(0..0, request.broker_diagnostics);
                 Ok(RuntimeRenderedPage {
                     page_id,
                     navigation_id,
@@ -406,6 +423,7 @@ fn drain_responses(
                     title,
                     display_list,
                     diagnostics,
+                    image_resources: request.image_resources,
                 })
             }
             Message::Response(Response::Failed { code, message }) => {

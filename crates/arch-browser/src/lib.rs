@@ -10,6 +10,7 @@ use archetype_types::{ArchetypeUrl, LoadStage, NavigationId, PageId};
 use thiserror::Error;
 use url::Url;
 
+pub mod runtime_broker;
 pub mod runtime_supervisor;
 pub mod snapshot;
 
