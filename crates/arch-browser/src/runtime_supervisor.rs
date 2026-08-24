@@ -27,6 +27,11 @@ const COMMAND_QUEUE_LIMIT: usize = 256;
 const MAXIMUM_PENDING_REQUESTS: usize = 64;
 const SUPERVISOR_TICK: Duration = Duration::from_millis(10);
 const RESOURCE_SAMPLE_INTERVAL: Duration = Duration::from_millis(250);
+const RESTART_BACKOFF: [Duration; 3] = [
+    Duration::from_millis(100),
+    Duration::from_millis(500),
+    Duration::from_secs(2),
+];
 
 #[derive(Clone, Copy, Debug)]
 pub struct RuntimeLimits {
@@ -252,6 +257,29 @@ impl RuntimeSupervisor {
         completion_receiver
     }
 
+    /// Force-terminates the current child so the supervisor recovery path can restart it.
+    #[must_use]
+    pub fn force_restart(&self) -> ShutdownReceiver {
+        let Ok(_command_gate) = self.command_gate.lock() else {
+            return completed(RuntimeProcessError::RuntimeDisconnected);
+        };
+        if !self.active.load(Ordering::Acquire) {
+            return completed(self.inactive_error());
+        }
+        let (completion_sender, completion_receiver) = mpsc::sync_channel(1);
+        if let Err(error) = self
+            .commands
+            .try_send(SupervisorCommand::ForceRestart(completion_sender))
+        {
+            let failure = match error {
+                TrySendError::Full(_) => RuntimeProcessError::Backpressure,
+                TrySendError::Disconnected(_) => RuntimeProcessError::RuntimeDisconnected,
+            };
+            return completed(failure);
+        }
+        completion_receiver
+    }
+
     fn inactive_error(&self) -> RuntimeProcessError {
         self.terminal_error
             .lock()
@@ -280,6 +308,7 @@ enum SupervisorCommand {
         completion: SyncSender<Result<RuntimeRenderedPage, RuntimeProcessError>>,
     },
     Shutdown(SyncSender<Result<(), RuntimeProcessError>>),
+    ForceRestart(SyncSender<Result<(), RuntimeProcessError>>),
 }
 
 enum ReaderEvent {
@@ -388,84 +417,131 @@ fn supervise(
     control: &SupervisorControl,
     limits: RuntimeLimits,
 ) {
-    let (mut child, mut input, responses, reader) = match start_child(executable) {
-        Ok(process) => process,
-        Err(error) => {
-            record_terminal_error(&control.terminal_error, error.clone());
-            deactivate(control, commands, &error);
-            let _ = ready.send(Err(error));
-            return;
-        }
-    };
-    if let Err(error) = perform_handshake(&mut input, &responses) {
-        record_terminal_error(&control.terminal_error, error.clone());
-        deactivate(control, commands, &error);
-        let _ = ready.send(Err(error));
-        terminate(&mut child, reader);
-        return;
-    }
-    let _ = ready.send(Ok(()));
-
-    let mut connection = RuntimeConnection::new(input, limits);
-    let mut last_resource_sample = Instant::now();
+    let mut ready_sent = false;
+    let mut restart_index = 0usize;
     loop {
-        if !connection.drain_responses(&responses) {
-            connection.fail_pending(&RuntimeProcessError::RuntimeDisconnected);
-            break;
+        let (mut child, mut input, responses, reader) = match start_child(executable) {
+            Ok(process) => process,
+            Err(error) => {
+                if !ready_sent {
+                    let _ = ready.send(Err(error.clone()));
+                }
+                finish_supervision(control, commands, &error);
+                return;
+            }
+        };
+        if let Err(error) = perform_handshake(&mut input, &responses) {
+            terminate(&mut child, reader);
+            if !ready_sent {
+                let _ = ready.send(Err(error.clone()));
+                finish_supervision(control, commands, &error);
+                return;
+            }
+            if !wait_to_restart(&mut restart_index) {
+                finish_supervision(control, commands, &error);
+                return;
+            }
+            continue;
         }
-        if connection.expire_requests() {
-            connection.fail_pending(&RuntimeProcessError::RuntimeDisconnected);
-            break;
+        if !ready_sent {
+            let _ = ready.send(Ok(()));
+            ready_sent = true;
         }
-        if last_resource_sample.elapsed() >= RESOURCE_SAMPLE_INTERVAL {
-            last_resource_sample = Instant::now();
-            if resident_bytes(child.id()).is_some_and(|rss| rss > limits.maximum_rss_bytes) {
-                let error = RuntimeProcessError::ResourceLimit {
-                    resource: "RSS".to_owned(),
-                };
-                connection.fail_pending(&error);
-                record_terminal_error(&control.terminal_error, error);
+
+        let mut connection = RuntimeConnection::new(input, limits);
+        let mut last_resource_sample = Instant::now();
+        let mut terminal_error = RuntimeProcessError::RuntimeDisconnected;
+        let mut shutdown = None;
+        let mut forced_restart = None;
+        let mut command_channel_closed = false;
+        loop {
+            if !connection.drain_responses(&responses) || connection.expire_requests() {
+                connection.fail_pending(&RuntimeProcessError::RuntimeDisconnected);
                 break;
             }
-        }
-        match commands.recv_timeout(SUPERVISOR_TICK) {
-            Ok(SupervisorCommand::Render {
-                document,
-                reserved_bytes,
-                completion,
-            }) => {
-                control
-                    .queued_bytes
-                    .fetch_sub(reserved_bytes, Ordering::AcqRel);
-                if let Err(error) = connection.queue_render(document, completion) {
-                    connection.fail_pending(&error);
+            if last_resource_sample.elapsed() >= RESOURCE_SAMPLE_INTERVAL {
+                last_resource_sample = Instant::now();
+                if resident_bytes(child.id()).is_some_and(|rss| rss > limits.maximum_rss_bytes) {
+                    terminal_error = RuntimeProcessError::ResourceLimit {
+                        resource: "RSS".to_owned(),
+                    };
+                    connection.fail_pending(&terminal_error);
                     break;
                 }
             }
-            Ok(SupervisorCommand::Shutdown(completion)) => {
-                connection.fail_pending(&RuntimeProcessError::RuntimeDisconnected);
-                deactivate(control, commands, &RuntimeProcessError::RuntimeDisconnected);
-                terminate(&mut child, reader);
-                let _ = completion.send(Ok(()));
-                return;
-            }
-            Err(RecvTimeoutError::Timeout) => {}
-            Err(RecvTimeoutError::Disconnected) => {
-                control.active.store(false, Ordering::Release);
-                connection.fail_pending(&RuntimeProcessError::RuntimeDisconnected);
-                terminate(&mut child, reader);
-                return;
+            match commands.recv_timeout(SUPERVISOR_TICK) {
+                Ok(SupervisorCommand::Render {
+                    document,
+                    reserved_bytes,
+                    completion,
+                }) => {
+                    control
+                        .queued_bytes
+                        .fetch_sub(reserved_bytes, Ordering::AcqRel);
+                    if let Err(error) = connection.queue_render(document, completion) {
+                        terminal_error = error.clone();
+                        connection.fail_pending(&error);
+                        break;
+                    }
+                }
+                Ok(SupervisorCommand::Shutdown(completion)) => {
+                    connection.fail_pending(&RuntimeProcessError::RuntimeDisconnected);
+                    shutdown = Some(completion);
+                    break;
+                }
+                Ok(SupervisorCommand::ForceRestart(completion)) => {
+                    connection.fail_pending(&RuntimeProcessError::RuntimeDisconnected);
+                    forced_restart = Some(completion);
+                    break;
+                }
+                Err(RecvTimeoutError::Timeout) => {}
+                Err(RecvTimeoutError::Disconnected) => {
+                    connection.fail_pending(&RuntimeProcessError::RuntimeDisconnected);
+                    command_channel_closed = true;
+                    break;
+                }
             }
         }
+        terminate(&mut child, reader);
+        if let Some(completion) = shutdown {
+            control.active.store(false, Ordering::Release);
+            let _ = completion.send(Ok(()));
+            return;
+        }
+        if command_channel_closed {
+            control.active.store(false, Ordering::Release);
+            return;
+        }
+        complete_forced_restart(forced_restart);
+        if !wait_to_restart(&mut restart_index) {
+            finish_supervision(control, commands, &terminal_error);
+            return;
+        }
     }
-    let error = control
-        .terminal_error
-        .lock()
-        .ok()
-        .and_then(|error| error.clone())
-        .unwrap_or(RuntimeProcessError::RuntimeDisconnected);
-    deactivate(control, commands, &error);
-    terminate(&mut child, reader);
+}
+
+fn complete_forced_restart(completion: Option<SyncSender<Result<(), RuntimeProcessError>>>) {
+    if let Some(completion) = completion {
+        let _ = completion.send(Ok(()));
+    }
+}
+
+fn wait_to_restart(restart_index: &mut usize) -> bool {
+    let Some(delay) = RESTART_BACKOFF.get(*restart_index) else {
+        return false;
+    };
+    thread::sleep(*delay);
+    *restart_index += 1;
+    true
+}
+
+fn finish_supervision(
+    control: &SupervisorControl,
+    commands: &Receiver<SupervisorCommand>,
+    error: &RuntimeProcessError,
+) {
+    record_terminal_error(&control.terminal_error, error.clone());
+    deactivate(control, commands, error);
 }
 
 fn start_child(
@@ -736,7 +812,8 @@ fn deactivate(
                     .fetch_sub(reserved_bytes, Ordering::AcqRel);
                 let _ = completion.send(Err(error.clone()));
             }
-            SupervisorCommand::Shutdown(completion) => {
+            SupervisorCommand::Shutdown(completion)
+            | SupervisorCommand::ForceRestart(completion) => {
                 let _ = completion.send(Err(error.clone()));
             }
         }

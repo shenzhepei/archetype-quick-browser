@@ -112,9 +112,19 @@ fn browser_supervisor_renders_through_the_real_subprocess() {
 }
 
 #[test]
-fn repeated_runtime_termination_keeps_the_supervisor_process_alive() {
-    for _ in 0..20 {
+fn one_hundred_forced_runtime_restarts_keep_the_supervisor_alive() {
+    for _ in 0..100 {
         let supervisor = start();
+        supervisor
+            .force_restart()
+            .recv_timeout(PROCESS_TIMEOUT)
+            .expect("forced termination should complete")
+            .expect("supervisor should accept forced termination");
+        supervisor
+            .render_document(document())
+            .recv_timeout(PROCESS_TIMEOUT)
+            .expect("render after restart should complete")
+            .expect("render after restart should succeed");
         supervisor
             .shutdown()
             .recv_timeout(PROCESS_TIMEOUT)
