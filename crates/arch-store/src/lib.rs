@@ -583,6 +583,21 @@ mod tests {
     use super::*;
 
     #[test]
+    fn initializes_empty_database_through_schema_v2() {
+        let store = Store::in_memory().unwrap();
+        let mut statement = store
+            .connection
+            .prepare("SELECT version FROM schema_migrations ORDER BY version")
+            .unwrap();
+        let versions = statement
+            .query_map([], |row| row.get::<_, i64>(0))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(versions, [1, 2]);
+    }
+
+    #[test]
     fn space_deletion_does_not_delete_global_tabs() {
         let mut store = Store::in_memory().unwrap();
         let space = store.create_space("Research").unwrap();
