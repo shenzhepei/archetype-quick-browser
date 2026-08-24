@@ -12,7 +12,7 @@ use thiserror::Error;
 
 pub const MAGIC: &str = "ARCH";
 pub const PROTOCOL_MAJOR: u16 = 4;
-pub const PROTOCOL_MINOR: u16 = 0;
+pub const PROTOCOL_MINOR: u16 = 1;
 pub const MAX_FRAME_BODY_BYTES: usize = 16 * 1024 * 1024;
 const MAX_FRAME_BODY_BYTES_U32: u32 = 16 * 1024 * 1024;
 
@@ -176,11 +176,17 @@ pub enum Request {
         url: ArchetypeUrl,
         html: String,
         viewport_width_px: u32,
+        #[serde(default = "default_viewport_height_px")]
+        viewport_height_px: u32,
         resources: Vec<BrokeredResource>,
     },
     Cancel {
         target_request_id: u64,
     },
+}
+
+const fn default_viewport_height_px() -> u32 {
+    900
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

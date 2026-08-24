@@ -122,12 +122,19 @@ fn handle_request(envelope: &Envelope) -> Response {
             url,
             html,
             viewport_width_px,
+            viewport_height_px,
             resources,
-        }) if *viewport_width_px > 0 => {
+        }) if *viewport_width_px > 0 && *viewport_height_px > 0 => {
             let Ok(viewport_width_px) = u16::try_from(*viewport_width_px) else {
                 return Response::Failed {
                     code: "invalid_viewport".to_owned(),
                     message: "viewport width exceeds 65535 pixels".to_owned(),
+                };
+            };
+            let Ok(viewport_height_px) = u16::try_from(*viewport_height_px) else {
+                return Response::Failed {
+                    code: "invalid_viewport".to_owned(),
+                    message: "viewport height exceeds 65535 pixels".to_owned(),
                 };
             };
             let document = arch_html::parse(html);
@@ -136,15 +143,20 @@ fn handle_request(envelope: &Envelope) -> Response {
             let mut diagnostics = Vec::new();
             let css = stylesheet_source(&document, &base, resources, &mut diagnostics);
             let stylesheet = arch_css::parse(&css);
-            let styled = arch_style::style_document(&document, &stylesheet);
+            let styled = arch_style::style_document_for_viewport(
+                &document,
+                &stylesheet,
+                f32::from(viewport_width_px),
+            );
             diagnostics.extend(stylesheet.diagnostics);
             diagnostics.extend(document_diagnostics(&document));
             let images = image_boxes(&document, &base, resources, &mut diagnostics);
             let links = link_targets(&document, &base);
-            let layout = arch_layout::layout(
+            let layout = arch_layout::layout_with_viewport(
                 &document,
                 &styled,
                 f32::from(viewport_width_px),
+                f32::from(viewport_height_px),
                 &images,
                 &links,
             );
@@ -159,7 +171,7 @@ fn handle_request(envelope: &Envelope) -> Response {
         }
         Message::Request(Request::RenderDocument { .. }) => Response::Failed {
             code: "invalid_viewport".to_owned(),
-            message: "viewport width must be greater than zero".to_owned(),
+            message: "viewport width and height must be greater than zero".to_owned(),
         },
         Message::Request(Request::Navigate { .. }) => Response::Accepted,
         Message::Request(Request::Cancel { target_request_id }) => Response::Cancelled {
@@ -413,7 +425,7 @@ mod tests {
             1,
             Message::ClientHello(ClientHello {
                 minimum_protocol_minor: 0,
-                maximum_protocol_minor: 0,
+                maximum_protocol_minor: PROTOCOL_MINOR,
                 capabilities: BTreeSet::from([
                     Capability::static_document(),
                     Capability::display_list_v1(),
@@ -437,6 +449,7 @@ mod tests {
                 html: "<title>Runtime</title><style>p { color: red }</style><p onclick='x()'>Hello</p>"
                     .to_owned(),
                 viewport_width_px: 800,
+                viewport_height_px: 600,
                 resources: Vec::new(),
             }),
         );
@@ -483,6 +496,7 @@ mod tests {
                 url: "https://example.test/".parse().unwrap(),
                 html: String::new(),
                 viewport_width_px: 0,
+                viewport_height_px: 600,
                 resources: Vec::new(),
             }),
         );
@@ -513,6 +527,7 @@ mod tests {
                 html: "<link rel='stylesheet' href='style.css'><p>Styled</p><img src='sample.png' alt='sample'>"
                     .to_owned(),
                 viewport_width_px: 800,
+                viewport_height_px: 600,
                 resources: vec![
                     BrokeredResource {
                         requested_url: "file:///fixture/style.css".parse().unwrap(),

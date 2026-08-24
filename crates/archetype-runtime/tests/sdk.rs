@@ -56,6 +56,34 @@ fn partner_sdk_renders_rgba_and_png_through_runtime() {
 }
 
 #[test]
+fn sdk_applies_media_queries_for_each_page_viewport() {
+    let engine = engine();
+    let narrow = block_on(engine.create_page(PageOptions::new(320, 240))).unwrap();
+    let wide = block_on(engine.create_page(PageOptions::new(1280, 720))).unwrap();
+    let document = StaticDocument::new(
+        "https://example.test/responsive",
+        "<style>main{width:300px;height:120px;background-color:red}\
+         @media (min-width:768px){main{background-color:blue}}</style>\
+         <main>responsive</main>",
+    )
+    .unwrap();
+
+    let narrow_frame = block_on(narrow.render(document.clone())).unwrap();
+    let wide_frame = block_on(wide.render(document)).unwrap();
+    let color_count =
+        |rgba: &[u8], color: [u8; 4]| rgba.chunks_exact(4).filter(|pixel| *pixel == color).count();
+    assert!(
+        color_count(narrow_frame.frame().rgba(), [255, 0, 0, 255])
+            > color_count(narrow_frame.frame().rgba(), [0, 0, 255, 255])
+    );
+    assert!(
+        color_count(wide_frame.frame().rgba(), [0, 0, 255, 255])
+            > color_count(wide_frame.frame().rgba(), [255, 0, 0, 255])
+    );
+    block_on(engine.shutdown()).unwrap();
+}
+
+#[test]
 fn sdk_rejects_a_runtime_with_the_wrong_digest_before_launch() {
     let error = block_on(
         Engine::builder()

@@ -900,7 +900,7 @@ fn render_document(
 ) -> RenderedPage {
     let title = arch_html::title(document).unwrap_or_else(|| url.as_str().to_owned());
     let stylesheet = arch_css::parse(css);
-    let styled = arch_style::style_document(document, &stylesheet);
+    let styled = arch_style::style_document_for_viewport(document, &stylesheet, viewport_width);
     let links = link_targets(document, url);
     let layout = arch_layout::layout(document, &styled, viewport_width, images, &links);
     let display_list = arch_paint::paint(&layout);
@@ -1355,8 +1355,8 @@ mod tests {
                 .unwrap();
         assert_eq!(
             expectations.len(),
-            50,
-            "fixture manifest must contain 50 pages"
+            62,
+            "fixture manifest must contain 62 pages"
         );
 
         let mut fixture_directories = fs::read_dir(&pages)
@@ -1367,8 +1367,8 @@ mod tests {
         fixture_directories.sort();
         assert_eq!(
             fixture_directories.len(),
-            50,
-            "fixture corpus must contain 50 directories"
+            62,
+            "fixture corpus must contain 62 directories"
         );
 
         let mut documents = Vec::new();

@@ -21,6 +21,7 @@ fn document() -> StaticDocument {
         html: "<!doctype html><title>Subprocess</title><style>p { color: blue }</style><p>Hello from Runtime</p>"
             .to_owned(),
         viewport_width_px: 1024,
+        viewport_height_px: 768,
         resources: Vec::new(),
         broker_diagnostics: Vec::new(),
     }
@@ -144,6 +145,7 @@ fn brokered_fixture_resources_render_through_the_real_subprocess() {
             navigation_id: NavigationId::zero().saturating_next(),
             url: Url::from_file_path(fixture).unwrap(),
             viewport_width_px: 1280,
+            viewport_height_px: 900,
         },
     )
     .unwrap();

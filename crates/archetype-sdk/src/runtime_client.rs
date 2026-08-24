@@ -57,6 +57,7 @@ pub struct StaticDocument {
     pub url: ArchetypeUrl,
     pub html: String,
     pub viewport_width_px: u32,
+    pub viewport_height_px: u32,
     pub resources: Vec<BrokeredResource>,
     pub broker_diagnostics: Vec<String>,
 }
@@ -72,6 +73,7 @@ impl StaticDocument {
                 url: self.url.clone(),
                 html: self.html.clone(),
                 viewport_width_px: self.viewport_width_px,
+                viewport_height_px: self.viewport_height_px,
                 resources: self.resources.clone(),
             }),
         )

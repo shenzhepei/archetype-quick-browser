@@ -597,6 +597,7 @@ fn render_page(
         url: document.url,
         html: document.html,
         viewport_width_px: options.width_px,
+        viewport_height_px: options.height_px,
         resources: document
             .resources
             .into_iter()

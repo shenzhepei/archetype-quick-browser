@@ -19,6 +19,7 @@ fn static_document_messages_round_trip_with_a_display_list() {
             url: url.clone(),
             html: "<!doctype html><title>Example</title><p>Hello</p>".to_owned(),
             viewport_width_px: 1280,
+            viewport_height_px: 720,
             resources: vec![BrokeredResource {
                 requested_url: "https://example.test/image.png".parse().unwrap(),
                 final_url: "https://example.test/image.png".parse().unwrap(),
@@ -47,6 +48,27 @@ fn static_document_messages_round_trip_with_a_display_list() {
         Codec::default().encode(&mut frame, &envelope).unwrap();
         assert_eq!(Codec::default().decode(frame.as_slice()).unwrap(), envelope);
     }
+}
+
+#[test]
+fn legacy_static_document_defaults_the_viewport_height() {
+    let request = serde_json::json!({
+        "type": "render_document",
+        "page_id": PageId::new(),
+        "navigation_id": 1,
+        "url": "https://example.test/legacy",
+        "html": "<p>legacy</p>",
+        "viewport_width_px": 800,
+        "resources": []
+    });
+    let decoded: Request = serde_json::from_value(request).unwrap();
+    assert!(matches!(
+        decoded,
+        Request::RenderDocument {
+            viewport_height_px: 900,
+            ..
+        }
+    ));
 }
 
 #[test]

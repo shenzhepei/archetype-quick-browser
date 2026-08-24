@@ -764,6 +764,7 @@ impl QuickBrowser {
                             navigation_id,
                             url: url.clone(),
                             viewport_width_px: 960,
+                            viewport_height_px: 700,
                         };
                         let document = if let Some(submission) = submission.as_ref() {
                             load_form_submission_with_cookies(

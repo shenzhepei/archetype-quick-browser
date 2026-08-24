@@ -21,6 +21,7 @@ pub struct BrokerRequest {
     pub navigation_id: NavigationId,
     pub url: Url,
     pub viewport_width_px: u32,
+    pub viewport_height_px: u32,
 }
 
 #[derive(Debug, Error)]
@@ -114,7 +115,11 @@ fn load_static_document_with(
     request: &BrokerRequest,
     load: &mut impl FnMut(&Url, usize, bool) -> Result<arch_net::ResponseBytes, LoadError>,
 ) -> Result<StaticDocument, BrokerError> {
-    if request.viewport_width_px == 0 || request.viewport_width_px > u32::from(u16::MAX) {
+    if request.viewport_width_px == 0
+        || request.viewport_width_px > u32::from(u16::MAX)
+        || request.viewport_height_px == 0
+        || request.viewport_height_px > u32::from(u16::MAX)
+    {
         return Err(BrokerError::InvalidViewport);
     }
     let response = load(&request.url, DOCUMENT_BYTE_LIMIT, true).map_err(|source| {
@@ -184,6 +189,7 @@ fn load_static_document_with(
         url: protocol_url(&response.final_url)?,
         html,
         viewport_width_px: request.viewport_width_px,
+        viewport_height_px: request.viewport_height_px,
         resources,
         broker_diagnostics: diagnostics,
     };
@@ -302,6 +308,7 @@ mod tests {
             navigation_id: NavigationId::zero().saturating_next(),
             url: Url::from_file_path(fixture).unwrap(),
             viewport_width_px: 1280,
+            viewport_height_px: 900,
         };
 
         let document = load_static_document(&Loader::default(), &request).unwrap();
@@ -332,6 +339,7 @@ mod tests {
             navigation_id: NavigationId::zero(),
             url: Url::from_file_path(&path).unwrap(),
             viewport_width_px: 800,
+            viewport_height_px: 600,
         };
 
         let error = load_static_document(&Loader::default(), &request).unwrap_err();
@@ -359,6 +367,7 @@ mod tests {
             navigation_id: NavigationId::zero(),
             url: Url::from_file_path(path).unwrap(),
             viewport_width_px: 800,
+            viewport_height_px: 600,
         };
 
         let document = load_static_document(&Loader::default(), &request).unwrap();
@@ -408,6 +417,7 @@ mod tests {
             navigation_id: NavigationId::zero().saturating_next(),
             url: target.clone(),
             viewport_width_px: 960,
+            viewport_height_px: 700,
         };
         let submission = FormSubmission {
             method: FormMethod::Post,
