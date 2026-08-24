@@ -185,7 +185,9 @@ fn load_error_title(language: Language, kind: LoadErrorKind) -> &'static str {
         LoadErrorKind::Timeout => language.request_timed_out(),
         LoadErrorKind::Tls => language.certificate_validation_failed(),
         LoadErrorKind::Connection => language.connection_failed(),
-        LoadErrorKind::HttpStatus => language.http_request_failed(),
+        LoadErrorKind::HttpStatus
+        | LoadErrorKind::InvalidRedirect
+        | LoadErrorKind::TooManyRedirects => language.http_request_failed(),
         LoadErrorKind::Network => language.secure_network_request_failed(),
     }
 }

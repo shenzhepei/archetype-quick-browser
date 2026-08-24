@@ -2,7 +2,7 @@ use std::{collections::HashMap, path::Path, str};
 
 use anyhow::{Context, Result};
 use arch_dom::NodeKind;
-use arch_net::{LoadError, LoadErrorKind, Loader};
+use arch_net::{LoadError, LoadErrorKind, Loader, ResponseBytes};
 use arch_paint::DisplayList;
 use arch_session::{
     BrowserCommand, BrowserEvent, Session,
@@ -82,6 +82,7 @@ pub struct PendingNavigation {
     page_id: PageId,
     navigation_id: NavigationId,
     url: Url,
+    top_level_url: Url,
 }
 
 impl PendingNavigation {
@@ -434,7 +435,15 @@ impl BrowserCore {
         pending: &PendingNavigation,
         viewport_width: f32,
     ) -> Result<RenderedPage> {
-        let rendered = render_url(&self.loader, &pending.url, viewport_width)?;
+        let render_result = render_url_with_cookies(
+            &self.loader,
+            &mut self.cookie_jar,
+            &pending.url,
+            &pending.top_level_url,
+            viewport_width,
+        );
+        self.persist_cookie_jar()?;
+        let rendered = render_result?;
         if !self.finish_navigation(page, pending, &rendered)? {
             anyhow::bail!("navigation result became stale");
         }
@@ -442,6 +451,19 @@ impl BrowserCore {
     }
 
     fn start_command(&mut self, command: BrowserCommand) -> Result<PendingNavigation> {
+        let page_id = match &command {
+            BrowserCommand::Navigate { page_id, .. }
+            | BrowserCommand::Back { page_id }
+            | BrowserCommand::Forward { page_id }
+            | BrowserCommand::Reload { page_id }
+            | BrowserCommand::Stop { page_id }
+            | BrowserCommand::Resize { page_id, .. }
+            | BrowserCommand::Scroll { page_id, .. } => page_id,
+        };
+        let top_level_url = self
+            .session
+            .current_url(page_id)
+            .and_then(|url| Url::parse(url.as_str()).ok());
         let event = self.session.handle(command);
         let BrowserEvent::NavigationStarted {
             page_id,
@@ -452,10 +474,12 @@ impl BrowserCore {
             anyhow::bail!("navigation command was ignored");
         };
         let url = Url::parse(url.as_str()).context("session returned invalid navigation URL")?;
+        let top_level_url = top_level_url.unwrap_or_else(|| url.clone());
         Ok(PendingNavigation {
             page_id,
             navigation_id,
             url,
+            top_level_url,
         })
     }
 
@@ -496,19 +520,100 @@ fn parsed_page_id(page: &Page) -> Option<PageId> {
     page.id.parse().ok()
 }
 
+#[derive(Clone, Copy)]
+enum ResourceContext {
+    Document,
+    Subresource,
+}
+
+trait PageResourceLoader {
+    fn load(
+        &mut self,
+        url: &Url,
+        limit: usize,
+        context: ResourceContext,
+    ) -> Result<ResponseBytes, LoadError>;
+}
+
+struct StatelessPageLoader<'a>(&'a Loader);
+
+impl PageResourceLoader for StatelessPageLoader<'_> {
+    fn load(
+        &mut self,
+        url: &Url,
+        limit: usize,
+        _context: ResourceContext,
+    ) -> Result<ResponseBytes, LoadError> {
+        self.0.load_with_limit(url, limit)
+    }
+}
+
+struct CookiePageLoader<'a> {
+    loader: &'a Loader,
+    cookie_jar: &'a mut CookieJar,
+    top_level_url: Url,
+}
+
+impl PageResourceLoader for CookiePageLoader<'_> {
+    fn load(
+        &mut self,
+        url: &Url,
+        limit: usize,
+        context: ResourceContext,
+    ) -> Result<ResponseBytes, LoadError> {
+        let response = self.loader.load_with_cookies(
+            url,
+            limit,
+            self.cookie_jar,
+            &self.top_level_url,
+            matches!(context, ResourceContext::Document),
+        )?;
+        if matches!(context, ResourceContext::Document) {
+            self.top_level_url.clone_from(&response.final_url);
+        }
+        Ok(response)
+    }
+}
+
 /// Loads and renders a UTF-8 static document into a V3 display list.
 ///
 /// # Errors
 /// Returns a typed error when loading fails, the document is not valid UTF-8, or the viewport is
 /// invalid.
 pub fn render_url(loader: &Loader, url: &Url, viewport_width: f32) -> Result<RenderedPage> {
+    let mut loader = StatelessPageLoader(loader);
+    render_url_with_loader(&mut loader, url, viewport_width)
+}
+
+fn render_url_with_cookies(
+    loader: &Loader,
+    cookie_jar: &mut CookieJar,
+    url: &Url,
+    top_level_url: &Url,
+    viewport_width: f32,
+) -> Result<RenderedPage> {
+    let mut loader = CookiePageLoader {
+        loader,
+        cookie_jar,
+        top_level_url: top_level_url.clone(),
+    };
+    render_url_with_loader(&mut loader, url, viewport_width)
+}
+
+fn render_url_with_loader(
+    loader: &mut impl PageResourceLoader,
+    url: &Url,
+    viewport_width: f32,
+) -> Result<RenderedPage> {
     if !viewport_width.is_finite() || viewport_width <= 0.0 {
         return Err(RenderError::Render { url: url.clone() }.into());
     }
-    let response = loader.load(url).map_err(|source| RenderError::Load {
-        url: url.clone(),
-        source,
-    })?;
+    let response = loader
+        .load(url, arch_net::DOCUMENT_LIMIT, ResourceContext::Document)
+        .map_err(|source| RenderError::Load {
+            url: url.clone(),
+            source,
+        })?;
     let source = str::from_utf8(&response.body).map_err(|source| RenderError::Parse {
         url: response.final_url.clone(),
         source,
@@ -522,7 +627,11 @@ pub fn render_url(loader: &Loader, url: &Url, viewport_width: f32) -> Result<Ren
             resource_diagnostics.push(format!("ignored cross-origin stylesheet: {stylesheet_url}"));
             continue;
         }
-        match loader.load(&stylesheet_url) {
+        match loader.load(
+            &stylesheet_url,
+            arch_net::DOCUMENT_LIMIT,
+            ResourceContext::Subresource,
+        ) {
             Ok(stylesheet) if !same_origin(&response.final_url, &stylesheet.final_url) => {
                 resource_diagnostics.push(format!(
                     "ignored stylesheet redirected across origins: {stylesheet_url}"
@@ -659,7 +768,7 @@ fn nearest_link(
 }
 
 fn load_images(
-    loader: &Loader,
+    loader: &mut impl PageResourceLoader,
     document: &arch_dom::Document,
     base: &Url,
     resource_total: &mut usize,
@@ -706,7 +815,7 @@ fn load_images(
             diagnostics.push(format!("ignored cross-origin image: {source}"));
             continue;
         }
-        match loader.load_with_limit(&source, IMAGE_LIMIT) {
+        match loader.load(&source, IMAGE_LIMIT, ResourceContext::Subresource) {
             Ok(resource) if !same_origin(base, &resource.final_url) => {
                 diagnostics.push(format!("ignored image redirected across origins: {source}"));
             }
@@ -788,7 +897,13 @@ fn inline_css(document: &arch_dom::Document) -> String {
 
 #[cfg(test)]
 mod tests {
-    use std::{collections::BTreeMap, fs};
+    use std::{
+        collections::BTreeMap,
+        fs,
+        io::{Read as _, Write as _},
+        net::TcpListener,
+        thread,
+    };
 
     use super::*;
     use arch_session::cookies::RequestMethod;
@@ -1287,6 +1402,53 @@ mod tests {
         let _ = fs::remove_file(&path);
         let _ = fs::remove_file(path.with_extension("db-shm"));
         let _ = fs::remove_file(path.with_extension("db-wal"));
+    }
+
+    #[test]
+    fn application_core_applies_cookies_to_following_navigation() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = thread::spawn(move || {
+            for expected_path in ["/set", "/check"] {
+                let (mut stream, _) = listener.accept().unwrap();
+                let mut request = [0_u8; 2048];
+                let length = stream.read(&mut request).unwrap();
+                let request = String::from_utf8_lossy(&request[..length]);
+                assert!(request.starts_with(&format!("GET {expected_path} ")));
+                if expected_path == "/set" {
+                    assert!(!request.to_ascii_lowercase().contains("cookie:"));
+                    write!(
+                        stream,
+                        "HTTP/1.1 200 OK\r\nSet-Cookie: session=ready; Path=/; HttpOnly; Expires=Tue, 03 Aug 2100 00:38:37 GMT\r\nContent-Length: 18\r\nConnection: close\r\n\r\n<title>Set</title>"
+                    )
+                    .unwrap();
+                } else {
+                    assert!(
+                        request
+                            .to_ascii_lowercase()
+                            .contains("cookie: session=ready")
+                    );
+                    write!(
+                        stream,
+                        "HTTP/1.1 200 OK\r\nContent-Length: 20\r\nConnection: close\r\n\r\n<title>Check</title>"
+                    )
+                    .unwrap();
+                }
+            }
+        });
+        let first_url = Url::parse(&format!("http://{address}/set")).unwrap();
+        let second_url = Url::parse(&format!("http://{address}/check")).unwrap();
+        let mut core = BrowserCore::in_memory().unwrap();
+        let page = core.create_page(&first_url).unwrap();
+        assert_eq!(
+            core.navigate(&page, &first_url, 1280.0).unwrap().title,
+            "Set"
+        );
+        assert_eq!(
+            core.navigate(&page, &second_url, 1280.0).unwrap().title,
+            "Check"
+        );
+        server.join().unwrap();
     }
 
     #[test]

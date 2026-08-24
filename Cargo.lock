@@ -184,6 +184,7 @@ dependencies = [
 name = "arch-net"
 version = "0.3.0"
 dependencies = [
+ "arch-session",
  "reqwest",
  "rustls",
  "thiserror 2.0.20",

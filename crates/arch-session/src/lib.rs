@@ -123,6 +123,12 @@ impl Session {
     }
 
     #[must_use]
+    pub fn current_url(&self, page_id: &PageId) -> Option<&ArchetypeUrl> {
+        let page = self.pages.get(page_id)?;
+        page.history.get(page.cursor)
+    }
+
+    #[must_use]
     pub fn handle(&mut self, command: BrowserCommand) -> BrowserEvent {
         match command {
             BrowserCommand::Navigate { page_id, url } => {
