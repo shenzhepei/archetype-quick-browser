@@ -2,7 +2,7 @@ use std::{collections::BTreeSet, str};
 
 use arch_dom::NodeKind;
 use arch_net::{LoadError, Loader};
-use archetype_protocol::{BrokeredResource, ResourceBytes, ResourceKind};
+use archetype_protocol::{BrokeredResource, Codec, ResourceBytes, ResourceKind};
 use archetype_types::{ArchetypeUrl, NavigationId, PageId};
 use thiserror::Error;
 use url::Url;
@@ -35,6 +35,8 @@ pub enum BrokerError {
     InvalidUrl(String),
     #[error("viewport width must be between 1 and 65535 pixels")]
     InvalidViewport,
+    #[error("brokered document exceeds the runtime frame limit: {0}")]
+    Frame(String),
 }
 
 /// Loads one document and its same-origin subresources in the Browser process.
@@ -110,7 +112,7 @@ pub fn load_static_document(
         }
     }
 
-    Ok(StaticDocument {
+    let document = StaticDocument {
         page_id: request.page_id.clone(),
         navigation_id: request.navigation_id,
         url: protocol_url(&response.final_url)?,
@@ -118,7 +120,11 @@ pub fn load_static_document(
         viewport_width_px: request.viewport_width_px,
         resources,
         broker_diagnostics: diagnostics,
-    })
+    };
+    Codec::default()
+        .encode(Vec::new(), &document.protocol_envelope(1))
+        .map_err(|error| BrokerError::Frame(error.to_string()))?;
+    Ok(document)
 }
 
 fn resource_urls(

@@ -1,7 +1,12 @@
 use std::time::Duration;
 
-use arch_browser::runtime_supervisor::{RuntimeProcessError, RuntimeSupervisor, StaticDocument};
+use arch_browser::{
+    runtime_broker::{BrokerRequest, load_static_document},
+    runtime_supervisor::{RuntimeProcessError, RuntimeSupervisor, StaticDocument},
+};
+use arch_net::Loader;
 use archetype_types::{NavigationId, PageId};
+use url::Url;
 
 const PROCESS_TIMEOUT: Duration = Duration::from_secs(6);
 
@@ -13,6 +18,8 @@ fn document() -> StaticDocument {
         html: "<!doctype html><title>Subprocess</title><style>p { color: blue }</style><p>Hello from Runtime</p>"
             .to_owned(),
         viewport_width_px: 1024,
+        resources: Vec::new(),
+        broker_diagnostics: Vec::new(),
     }
 }
 
@@ -65,4 +72,44 @@ fn repeated_runtime_termination_keeps_the_supervisor_process_alive() {
             .expect("shutdown should complete")
             .expect("shutdown should reap the runtime");
     }
+}
+
+#[test]
+fn brokered_fixture_resources_render_through_the_real_subprocess() {
+    let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../fixtures/pages/05-image/index.html");
+    let document = load_static_document(
+        &Loader::default(),
+        &BrokerRequest {
+            page_id: PageId::new(),
+            navigation_id: NavigationId::zero().saturating_next(),
+            url: Url::from_file_path(fixture).unwrap(),
+            viewport_width_px: 1280,
+        },
+    )
+    .unwrap();
+    let supervisor = start();
+
+    let rendered = supervisor
+        .render_document(document)
+        .recv_timeout(PROCESS_TIMEOUT)
+        .expect("render should complete")
+        .expect("render should succeed");
+
+    assert!(
+        rendered
+            .display_list
+            .commands
+            .iter()
+            .any(|command| matches!(
+                command,
+                arch_paint::DisplayCommand::Image { loaded: true, .. }
+            ))
+    );
+    assert_eq!(rendered.image_resources.len(), 1);
+    supervisor
+        .shutdown()
+        .recv_timeout(PROCESS_TIMEOUT)
+        .expect("shutdown should complete")
+        .expect("shutdown should succeed");
 }

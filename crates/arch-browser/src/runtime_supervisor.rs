@@ -37,6 +37,22 @@ pub struct StaticDocument {
     pub broker_diagnostics: Vec<String>,
 }
 
+impl StaticDocument {
+    pub(crate) fn protocol_envelope(&self, request_id: u64) -> Envelope {
+        Envelope::v4(
+            request_id,
+            Message::Request(Request::RenderDocument {
+                page_id: self.page_id.clone(),
+                navigation_id: self.navigation_id,
+                url: self.url.clone(),
+                html: self.html.clone(),
+                viewport_width_px: self.viewport_width_px,
+                resources: self.resources.clone(),
+            }),
+        )
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct RuntimeRenderedPage {
     pub page_id: PageId,
@@ -234,17 +250,7 @@ fn supervise(
                     let _ = completion.send(Err(RuntimeProcessError::Backpressure));
                     continue;
                 };
-                let envelope = Envelope::v4(
-                    request_id,
-                    Message::Request(Request::RenderDocument {
-                        page_id: document.page_id.clone(),
-                        navigation_id: document.navigation_id,
-                        url: document.url,
-                        html: document.html,
-                        viewport_width_px: document.viewport_width_px,
-                        resources: document.resources.clone(),
-                    }),
-                );
+                let envelope = document.protocol_envelope(request_id);
                 if let Err(error) = write_envelope(&mut input, &envelope) {
                     let _ = completion.send(Err(error.clone()));
                     fail_pending(&mut pending, &error);
@@ -349,6 +355,7 @@ fn perform_handshake(
         Capability::static_document(),
         Capability::display_list_v1(),
         Capability::cancellable_navigation(),
+        Capability::resource_broker_v1(),
     ]);
     write_envelope(
         input,
@@ -371,7 +378,10 @@ fn perform_handshake(
         ReaderEvent::Envelope(envelope) if envelope.request_id() == 1 => match envelope.message() {
             Message::ServerHello(hello)
                 if hello.capabilities.contains(&Capability::static_document())
-                    && hello.capabilities.contains(&Capability::display_list_v1()) =>
+                    && hello.capabilities.contains(&Capability::display_list_v1())
+                    && hello
+                        .capabilities
+                        .contains(&Capability::resource_broker_v1()) =>
             {
                 Ok(())
             }

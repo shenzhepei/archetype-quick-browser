@@ -13,11 +13,15 @@ arch-html = { path = "../arch-html" }
 arch-layout = { path = "../arch-layout" }
 arch-paint = { path = "../arch-paint" }
 arch-style = { path = "../arch-style" }
+image.workspace = true
 thiserror.workspace = true
+url.workspace = true
 
 [dev-dependencies]
 arch-browser = { path = "../arch-browser" }
+arch-net = { path = "../arch-net" }
 archetype-types = { path = "../archetype-types" }
+url.workspace = true
 
 [lints]
 workspace = true
