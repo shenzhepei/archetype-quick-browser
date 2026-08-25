@@ -1,4 +1,0 @@
-interface:
-  display_name: "Quick Browser Feature 文档"
-  short_description: "维护跨版本 feature PRD、详设、配对和追踪"
-  default_prompt: "使用 $feature-docs 记录 Quick Browser 的补充 feature，并校验 PRD、详设、索引和链接。"
