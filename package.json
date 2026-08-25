@@ -25,6 +25,7 @@
     "preview": "vite preview --config vite.web.config.ts",
     "start": "electron-vite preview",
     "package:mac": "pnpm build && CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac dmg zip",
+    "package:win": "pnpm build && electron-builder --win nsis zip",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "typecheck": "tsc --noEmit"
@@ -66,6 +67,13 @@
       "icon": "build/icon.icns",
       "target": [
         "dmg",
+        "zip"
+      ]
+    },
+    "win": {
+      "icon": "build/icon.png",
+      "target": [
+        "nsis",
         "zip"
       ]
     }

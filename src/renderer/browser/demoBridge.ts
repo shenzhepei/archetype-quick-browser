@@ -30,6 +30,7 @@ const publish = (): void => listeners.forEach((listener) => listener(structuredC
 const active = (): TabState => state.tabs.find((tab) => tab.id === state.activeTabId)!
 
 export const demoBridge: ArchetypeBridge = {
+  platform: 'web',
   getState: async () => structuredClone(state),
   newTab: async (url = 'about:blank') => {
     const tab = { id: crypto.randomUUID(), url, title: 'New tab', loading: false, canGoBack: false, canGoForward: false }
@@ -68,6 +69,17 @@ export const demoBridge: ArchetypeBridge = {
     Object.assign(active(), { url: `archetype://${path}`, title: path.startsWith('history') ? 'History' : 'Settings' })
     publish()
   },
+  openUtility: async (path) => {
+    const prefix = path.startsWith('settings/') ? 'archetype://settings/' : `archetype://${path}`
+    const existing = state.tabs.find((tab) => tab.url.startsWith(prefix))
+    if (existing) {
+      state = { ...state, activeTabId: existing.id }
+    } else {
+      const tab = { id: crypto.randomUUID(), url: `archetype://${path}`, title: path === 'history' ? 'History' : 'Settings', loading: false, canGoBack: false, canGoForward: false }
+      state = { ...state, tabs: [...state.tabs, tab], activeTabId: tab.id }
+    }
+    publish()
+  },
   updateSettings: async (settings: Partial<BrowserSettings>) => {
     state = { ...state, settings: { ...state.settings, ...settings } }
     publish()
@@ -76,6 +88,11 @@ export const demoBridge: ArchetypeBridge = {
     state = { ...state, history: [] }
     publish()
   },
+  showMenu: async () => undefined,
+  showTabMenu: async () => undefined,
+  getAppVersion: async () => '0.1.0',
+  checkForUpdates: async () => ({ currentVersion: '0.1.0', checkedAt: Date.now(), state: 'unavailable' }),
+  openLatestRelease: async () => undefined,
   setContentBounds: (_bounds: ContentBounds) => undefined,
   onState: (callback) => {
     listeners.add(callback)

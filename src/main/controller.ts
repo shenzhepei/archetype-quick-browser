@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { BaseWindow, WebContents, WebContentsView, session } from 'electron'
+import { internalPageTitle } from '../shared/browser'
 import type {
   Bookmark,
   BrowserSettings,
@@ -64,6 +65,7 @@ export class BrowserController {
   createTab(input = 'about:blank', title = 'New tab', select = true): void {
     const id = randomUUID()
     const url = normalizeAddress(input)
+    const resolvedTitle = url.startsWith(INTERNAL_PREFIX) ? internalPageTitle(url, this.settings.language) : title
     const view = new WebContentsView({
       webPreferences: {
         contextIsolation: true,
@@ -74,7 +76,7 @@ export class BrowserController {
     })
     const tab: BrowserTab = {
       view,
-      state: { id, url, title, loading: false, canGoBack: false, canGoForward: false }
+      state: { id, url, title: resolvedTitle, loading: false, canGoBack: false, canGoForward: false }
     }
     this.tabs.set(id, tab)
     this.bindTab(tab)
@@ -99,20 +101,31 @@ export class BrowserController {
   closeTab(id: string): void {
     const ids = [...this.tabs.keys()]
     const index = ids.indexOf(id)
+    if (index < 0) return
+    this.closeTabs([id], ids[index + 1] ?? ids[index - 1])
+  }
+
+  reloadTab(id: string): void {
     const tab = this.tabs.get(id)
     if (!tab) return
-    this.window.contentView.removeChildView(tab.view)
-    tab.view.webContents.close()
-    this.tabs.delete(id)
-    if (this.tabs.size === 0) {
-      this.createTab()
-      return
-    }
-    if (id === this.activeTabId) this.selectTab(ids[index + 1] ?? ids[index - 1])
-    else {
+    if (tab.state.url.startsWith(INTERNAL_PREFIX)) {
+      tab.state.title = internalPageTitle(tab.state.url, this.settings.language)
       this.publish()
-      void this.persist()
+    } else {
+      tab.view.webContents.reload()
     }
+  }
+
+  closeOtherTabs(id: string): void {
+    if (!this.tabs.has(id)) return
+    this.closeTabs([...this.tabs.keys()].filter((tabId) => tabId !== id), id)
+  }
+
+  closeTabsToRight(id: string): void {
+    const ids = [...this.tabs.keys()]
+    const index = ids.indexOf(id)
+    if (index < 0) return
+    this.closeTabs(ids.slice(index + 1), id)
   }
 
   navigate(input: string): void {
@@ -122,7 +135,7 @@ export class BrowserController {
     tab.state.favicon = undefined
     if (url.startsWith(INTERNAL_PREFIX)) {
       this.window.contentView.removeChildView(tab.view)
-      tab.state.title = this.internalTitle(url)
+      tab.state.title = internalPageTitle(url, this.settings.language)
       tab.state.loading = false
       this.publish()
       void this.persist()
@@ -134,6 +147,20 @@ export class BrowserController {
     }
     void tab.view.webContents.loadURL(url)
     this.publish()
+  }
+
+  openUtilityPage(path: 'history' | 'settings/appearance'): void {
+    const url = `${INTERNAL_PREFIX}${path}`
+    const existing = [...this.tabs.entries()].find(([, tab]) =>
+      path.startsWith('settings/')
+        ? tab.state.url.startsWith(`${INTERNAL_PREFIX}settings/`)
+        : tab.state.url === url
+    )
+    if (existing) {
+      this.selectTab(existing[0])
+      return
+    }
+    this.createTab(url, internalPageTitle(url, this.settings.language))
   }
 
   back(): void {
@@ -178,6 +205,13 @@ export class BrowserController {
 
   updateSettings(settings: Partial<BrowserSettings>): void {
     this.settings = { ...this.settings, ...settings }
+    if (settings.language) {
+      for (const tab of this.tabs.values()) {
+        if (tab.state.url.startsWith(INTERNAL_PREFIX)) {
+          tab.state.title = internalPageTitle(tab.state.url, settings.language)
+        }
+      }
+    }
     this.publish()
     void this.persist()
   }
@@ -197,6 +231,25 @@ export class BrowserController {
     const tab = this.tabs.get(this.activeTabId)
     if (!tab) throw new Error('Active browser tab is unavailable')
     return tab
+  }
+
+  private closeTabs(ids: string[], fallbackId?: string): void {
+    const closing = new Set(ids.filter((id) => this.tabs.has(id)))
+    if (closing.size === 0) return
+    for (const id of closing) {
+      const tab = this.tabs.get(id)!
+      if (this.window.contentView.children.includes(tab.view)) this.window.contentView.removeChildView(tab.view)
+      tab.view.webContents.close()
+      this.tabs.delete(id)
+    }
+    if (this.tabs.size === 0) {
+      this.createTab()
+    } else if (closing.has(this.activeTabId)) {
+      this.selectTab(fallbackId && this.tabs.has(fallbackId) ? fallbackId : this.tabs.keys().next().value!)
+    } else {
+      this.publish()
+      void this.persist()
+    }
   }
 
   private bindTab(tab: BrowserTab): void {
@@ -247,12 +300,6 @@ export class BrowserController {
     this.history = this.history.slice(0, 1000)
     this.publish()
     void this.persist()
-  }
-
-  private internalTitle(url: string): string {
-    if (url.includes('history')) return 'History'
-    if (url.includes('about')) return 'About Archetype'
-    return 'Settings'
   }
 
   private publish(): void {

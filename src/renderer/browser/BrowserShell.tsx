@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef } from 'react'
 import type { ArchetypeBridge, BrowserState } from '../../shared/browser'
 import { BookmarksBar } from './BookmarksBar'
 import { InternalPage } from './InternalPage'
@@ -12,7 +12,6 @@ interface BrowserShellProps {
 
 export function BrowserShell({ bridge, state }: BrowserShellProps): React.JSX.Element {
   const contentRef = useRef<HTMLElement>(null)
-  const [menuOpen, setMenuOpen] = useState(false)
   const activeTab = state.tabs.find((tab) => tab.id === state.activeTabId)
   const internal = activeTab?.url.startsWith('archetype://') ?? false
 
@@ -32,7 +31,7 @@ export function BrowserShell({ bridge, state }: BrowserShellProps): React.JSX.El
   return (
     <div className={`browser-shell ${state.bookmarks.length > 0 ? 'has-bookmarks' : ''}`}>
       <TabStrip state={state} bridge={bridge} />
-      <Toolbar state={state} bridge={bridge} menuOpen={menuOpen} setMenuOpen={setMenuOpen} />
+      <Toolbar state={state} bridge={bridge} />
       <BookmarksBar bookmarks={state.bookmarks} bridge={bridge} />
       <main className="browser-content" ref={contentRef}>
         {internal && activeTab ? <InternalPage url={activeTab.url} state={state} bridge={bridge} /> : null}

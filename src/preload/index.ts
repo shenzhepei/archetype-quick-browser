@@ -1,7 +1,9 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import type { ArchetypeBridge, BrowserSettings, BrowserState, ContentBounds } from '../shared/browser'
+import type { ArchetypeBridge, BrowserSettings, BrowserState, ContentBounds, PopupPosition, TabMenuRequest } from '../shared/browser'
 
 const bridge: ArchetypeBridge = {
+  platform:
+    process.platform === 'darwin' || process.platform === 'win32' ? process.platform : 'linux',
   getState: () => ipcRenderer.invoke('browser:get-state'),
   newTab: (url) => ipcRenderer.invoke('browser:new-tab', url),
   selectTab: (id) => ipcRenderer.invoke('browser:select-tab', id),
@@ -13,9 +15,15 @@ const bridge: ArchetypeBridge = {
   stop: () => ipcRenderer.invoke('browser:stop'),
   toggleBookmark: () => ipcRenderer.invoke('browser:toggle-bookmark'),
   openInternal: (path) => ipcRenderer.invoke('browser:open-internal', path),
+  openUtility: (path) => ipcRenderer.invoke('browser:open-utility', path),
   updateSettings: (settings: Partial<BrowserSettings>) =>
     ipcRenderer.invoke('browser:update-settings', settings),
   clearHistory: () => ipcRenderer.invoke('browser:clear-history'),
+  showMenu: (position: PopupPosition) => ipcRenderer.invoke('browser:show-menu', position),
+  showTabMenu: (request: TabMenuRequest) => ipcRenderer.invoke('browser:show-tab-menu', request),
+  getAppVersion: () => ipcRenderer.invoke('browser:get-app-version'),
+  checkForUpdates: (force = false) => ipcRenderer.invoke('browser:check-for-updates', force),
+  openLatestRelease: () => ipcRenderer.invoke('browser:open-latest-release'),
   setContentBounds: (bounds: ContentBounds) => ipcRenderer.send('browser:set-content-bounds', bounds),
   onState: (callback: (state: BrowserState) => void) => {
     const listener = (_event: Electron.IpcRendererEvent, state: BrowserState): void => callback(state)

@@ -7,7 +7,7 @@ export function TabStrip({ state, bridge }: { state: BrowserState; bridge: Arche
   return (
     <div className="tab-strip" role="tablist">
       <div className="window-drag-space" />
-      <div className="tabs-scroll">
+      <div className="tabs-scroll" style={{ flexBasis: `${state.tabs.length * 221 + 38}px` }}>
         {state.tabs.map((tab) => (
           <button
             className={`tab ${tab.id === state.activeTabId ? 'is-active' : ''}`}
@@ -15,6 +15,10 @@ export function TabStrip({ state, bridge }: { state: BrowserState; bridge: Arche
             role="tab"
             aria-selected={tab.id === state.activeTabId}
             onClick={() => void bridge.selectTab(tab.id)}
+            onContextMenu={(event) => {
+              event.preventDefault()
+              void bridge.showTabMenu({ tabId: tab.id, x: event.clientX, y: event.clientY })
+            }}
           >
             <TabIcon tab={tab} />
             <span className="tab-title">{tab.title || t('newTab')}</span>

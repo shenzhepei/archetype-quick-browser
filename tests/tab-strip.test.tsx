@@ -15,13 +15,16 @@ it('selects, closes, and creates tabs', () => {
   const bridge = {
     selectTab: vi.fn(),
     closeTab: vi.fn(),
-    newTab: vi.fn()
+    newTab: vi.fn(),
+    showTabMenu: vi.fn()
   } as unknown as ArchetypeBridge
   render(<TabStrip state={state} bridge={bridge} />)
   fireEvent.click(screen.getByRole('tab'))
   fireEvent.click(screen.getByLabelText('Close tab'))
   fireEvent.click(screen.getByLabelText('New tab'))
+  fireEvent.contextMenu(screen.getByRole('tab'), { clientX: 120, clientY: 24 })
   expect(bridge.selectTab).toHaveBeenCalledWith('one')
   expect(bridge.closeTab).toHaveBeenCalledWith('one')
   expect(bridge.newTab).toHaveBeenCalled()
+  expect(bridge.showTabMenu).toHaveBeenCalledWith({ tabId: 'one', x: 120, y: 24 })
 })

@@ -31,6 +31,13 @@ export const resources = {
       emptyHistory: 'No browsing history yet',
       version: 'Version {{version}}',
       chromium: 'Web content is rendered by Electron Chromium.',
+      checkingUpdates: 'Checking for updates...',
+      upToDate: 'Archetype is up to date.',
+      updateAvailable: 'Version {{version}} is available.',
+      noRelease: 'No GitHub Release has been published yet.',
+      updateUnavailable: 'Unable to check GitHub Releases.',
+      checkAgain: 'Check again',
+      viewRelease: 'View release',
       openBookmark: 'Open {{title}}'
     }
   },
@@ -63,6 +70,13 @@ export const resources = {
       emptyHistory: '暂无浏览记录',
       version: '版本 {{version}}',
       chromium: '网页内容由 Electron Chromium 渲染。',
+      checkingUpdates: '正在检查更新...',
+      upToDate: 'Archetype 已是最新版本。',
+      updateAvailable: '发现新版本 {{version}}。',
+      noRelease: 'GitHub 尚未发布 Release。',
+      updateUnavailable: '暂时无法检查 GitHub Release。',
+      checkAgain: '重新检查',
+      viewRelease: '查看 Release',
       openBookmark: '打开 {{title}}'
     }
   }

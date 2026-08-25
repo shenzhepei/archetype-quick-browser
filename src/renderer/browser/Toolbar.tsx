@@ -2,16 +2,13 @@ import { ArrowLeft, ArrowRight, EllipsisVertical, RefreshCw, Star, UserRound, X 
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { ArchetypeBridge, BrowserState } from '../../shared/browser'
-import { BrowserMenu } from './BrowserMenu'
 
 interface ToolbarProps {
   state: BrowserState
   bridge: ArchetypeBridge
-  menuOpen: boolean
-  setMenuOpen(open: boolean): void
 }
 
-export function Toolbar({ state, bridge, menuOpen, setMenuOpen }: ToolbarProps): React.JSX.Element {
+export function Toolbar({ state, bridge }: ToolbarProps): React.JSX.Element {
   const { t } = useTranslation()
   const active = state.tabs.find((tab) => tab.id === state.activeTabId)
   const [address, setAddress] = useState(active?.url ?? '')
@@ -54,15 +51,20 @@ export function Toolbar({ state, bridge, menuOpen, setMenuOpen }: ToolbarProps):
           <Star size={17} fill={bookmarked ? 'currentColor' : 'none'} />
         </button>
       </form>
-      <button className="avatar-button" aria-label={t('profile')} title={t('profile')} onClick={() => void bridge.openInternal('settings/appearance')}>
+      <button className="avatar-button" aria-label={t('profile')} title={t('profile')} onClick={() => void bridge.openUtility('settings/appearance')}>
         <UserRound size={17} />
       </button>
-      <div className="menu-anchor">
-        <button className="icon-button" aria-label={t('menu')} title={t('menu')} aria-expanded={menuOpen} onClick={() => setMenuOpen(!menuOpen)}>
-          <EllipsisVertical size={18} />
-        </button>
-        {menuOpen ? <BrowserMenu bridge={bridge} settings={state.settings} close={() => setMenuOpen(false)} /> : null}
-      </div>
+      <button
+        className="icon-button"
+        aria-label={t('menu')}
+        title={t('menu')}
+        onClick={(event) => {
+          const rect = event.currentTarget.getBoundingClientRect()
+          void bridge.showMenu({ x: rect.left, y: rect.bottom })
+        }}
+      >
+        <EllipsisVertical size={18} />
+      </button>
     </div>
   )
 }
