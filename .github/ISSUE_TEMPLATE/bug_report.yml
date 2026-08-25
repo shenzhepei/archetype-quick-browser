@@ -1,65 +1,38 @@
 name: Bug report
-description: Report a reproducible problem in Archetype Quick Browser
+description: Report a reproducible Archetype problem.
 title: "[Bug]: "
-labels: ["bug", "triage"]
+labels: [bug]
 body:
   - type: markdown
     attributes:
-      value: |
-        Thanks for reporting a problem. Do not include passwords, tokens, or private data.
+      value: Remove passwords, tokens, private URLs, and personal data before submitting.
   - type: textarea
-    id: summary
+    id: problem
     attributes:
-      label: Summary
-      description: Clearly describe the problem and its impact.
-      placeholder: What happened?
+      label: Problem
+      description: What happened, and what did you expect instead?
     validations:
       required: true
   - type: textarea
     id: steps
     attributes:
-      label: Steps to reproduce
-      description: Provide the smallest reliable sequence that reproduces the problem.
-      placeholder: |
-        1. Start with ...
-        2. Run ...
-        3. Observe ...
+      label: Reproduction steps
+      placeholder: "1. Open...\n2. Navigate...\n3. Observe..."
     validations:
       required: true
-  - type: textarea
-    id: expected
+  - type: input
+    id: version
     attributes:
-      label: Expected behavior
-      placeholder: What should have happened?
+      label: Archetype version
     validations:
       required: true
-  - type: textarea
-    id: actual
-    attributes:
-      label: Actual behavior
-      placeholder: What happened instead?
-    validations:
-      required: true
-  - type: textarea
+  - type: input
     id: environment
     attributes:
-      label: Environment
-      description: Include the app revision, macOS version, architecture, and relevant page URL or path.
-      placeholder: App revision, macOS version, Mac architecture, and page source
+      label: Operating system and architecture
     validations:
       required: true
   - type: textarea
-    id: logs
+    id: context
     attributes:
-      label: Logs or screenshots
-      description: Remove secrets and private data before attaching diagnostic output.
-      render: shell
-  - type: checkboxes
-    id: checks
-    attributes:
-      label: Checks
-      options:
-        - label: I searched existing issues for duplicates.
-          required: true
-        - label: I removed passwords, tokens, and private data from this report.
-          required: true
+      label: Additional context

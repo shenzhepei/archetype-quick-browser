@@ -10,19 +10,20 @@ permissions:
 
 jobs:
   coverage:
-    name: Coverage
-    runs-on: macos-14
-    timeout-minutes: 30
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: pnpm/action-setup@v4
         with:
-          components: llvm-tools-preview
-      - uses: taiki-e/install-action@cargo-llvm-cov
-      - run: mkdir -p coverage
-      - run: cargo llvm-cov --workspace --lcov --output-path coverage/lcov.info
+          version: 10.33.2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm test:coverage
       - uses: codecov/codecov-action@v5
         with:
-          files: ./coverage/lcov.info
           use_oidc: true
           fail_ci_if_error: true
+          files: coverage/lcov.info
