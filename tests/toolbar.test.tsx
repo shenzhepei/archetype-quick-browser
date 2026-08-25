@@ -8,16 +8,19 @@ const state: BrowserState = {
   activeTabId: 'one',
   bookmarks: [],
   history: [],
-  settings: { theme: 'system', language: 'en' }
+  settings: { theme: 'system', language: 'en' },
+  siteInfo: { url: 'https://example.com', origin: 'https://example.com', connection: 'secure', permissions: [] }
 }
 
 it('requests the native browser menu from the toolbar', () => {
-  const bridge = { showMenu: vi.fn(), openUtility: vi.fn() } as unknown as ArchetypeBridge
+  const bridge = { showMenu: vi.fn(), showSiteInfo: vi.fn(), openUtility: vi.fn() } as unknown as ArchetypeBridge
   render(<Toolbar state={state} bridge={bridge} />)
 
   fireEvent.click(screen.getByRole('button', { name: 'Profile and settings' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Site information' }))
   fireEvent.click(screen.getByRole('button', { name: 'Main menu' }))
 
   expect(bridge.openUtility).toHaveBeenCalledWith('settings/appearance')
+  expect(bridge.showSiteInfo).toHaveBeenCalledWith({ x: 0, y: 0 })
   expect(bridge.showMenu).toHaveBeenCalledWith({ x: 0, y: 0 })
 })

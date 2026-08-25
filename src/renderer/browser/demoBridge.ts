@@ -22,7 +22,8 @@ let state: BrowserState = {
     { id: 'docs', title: 'Archetype', url: 'https://github.com/shenzhepei/archetype-quick-browser', createdAt: 0 }
   ],
   history: [],
-  settings: { theme: 'system', language: 'en' }
+  settings: { theme: 'system', language: 'en' },
+  siteInfo: { url: 'https://example.com', origin: 'https://example.com', connection: 'secure', permissions: [] }
 }
 
 const listeners = new Set<(next: BrowserState) => void>()
@@ -90,6 +91,7 @@ export const demoBridge: ArchetypeBridge = {
   },
   showMenu: async () => undefined,
   showTabMenu: async () => undefined,
+  showSiteInfo: async () => undefined,
   getAppVersion: async () => '0.1.0',
   checkForUpdates: async () => ({ currentVersion: '0.1.0', checkedAt: Date.now(), state: 'unavailable' }),
   openLatestRelease: async () => undefined,

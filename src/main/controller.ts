@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { BaseWindow, WebContents, WebContentsView, session } from 'electron'
+import { BaseWindow, WebContents, WebContentsView } from 'electron'
 import { internalPageTitle } from '../shared/browser'
 import type {
   Bookmark,
@@ -10,6 +10,7 @@ import type {
   TabState
 } from '../shared/browser'
 import { BrowserStore } from './store'
+import { SiteSecurityService } from './site-security'
 
 interface BrowserTab {
   state: TabState
@@ -38,7 +39,8 @@ export class BrowserController {
   constructor(
     private readonly window: BaseWindow,
     private readonly shellContents: WebContents,
-    private readonly store: BrowserStore
+    private readonly store: BrowserStore,
+    private readonly siteSecurity: SiteSecurityService
   ) {}
 
   async initialize(): Promise<void> {
@@ -58,7 +60,8 @@ export class BrowserController {
       activeTabId: this.activeTabId,
       bookmarks: structuredClone(this.bookmarks),
       history: structuredClone(this.history),
-      settings: { ...this.settings }
+      settings: { ...this.settings },
+      siteInfo: this.siteSecurity.infoFor(this.tabs.get(this.activeTabId)?.state.url ?? '')
     }
   }
 
@@ -222,6 +225,10 @@ export class BrowserController {
     void this.persist()
   }
 
+  refreshSiteInfo(): void {
+    this.publish()
+  }
+
   dispose(): void {
     for (const tab of this.tabs.values()) tab.view.webContents.close()
     this.tabs.clear()
@@ -317,9 +324,4 @@ export class BrowserController {
       state.settings = this.settings
     })
   }
-}
-
-export function configureSession(): void {
-  const browserSession = session.fromPartition('persist:archetype')
-  browserSession.setPermissionRequestHandler((_webContents, _permission, callback) => callback(false))
 }

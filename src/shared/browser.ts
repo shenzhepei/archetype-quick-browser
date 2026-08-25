@@ -19,6 +19,47 @@ export interface ReleaseStatus {
   state: ReleaseCheckState
 }
 
+export type SiteConnection = 'secure' | 'verifying' | 'insecure' | 'local' | 'internal' | 'none'
+
+export interface CertificateSummary {
+  subjectName: string
+  issuerName: string
+  validStart: number
+  validExpiry: number
+  fingerprint: string
+  serialNumber: string
+  isIssuedByKnownRoot: boolean
+  verificationResult: string
+  errorCode: number
+}
+
+export interface SitePermissionRecord {
+  permission: string
+  state: 'granted' | 'blocked'
+}
+
+export interface SiteInfo {
+  url: string
+  origin?: string
+  connection: SiteConnection
+  certificate?: CertificateSummary
+  permissions: SitePermissionRecord[]
+}
+
+export function baseSiteInfo(url: string): SiteInfo {
+  if (!url || url === 'about:blank') return { url, connection: 'none', permissions: [] }
+  if (url.startsWith('archetype://')) return { url, connection: 'internal', permissions: [] }
+  if (url.startsWith('file:')) return { url, connection: 'local', permissions: [] }
+  try {
+    const parsed = new URL(url)
+    if (parsed.protocol === 'https:') return { url, origin: parsed.origin, connection: 'verifying', permissions: [] }
+    if (parsed.protocol === 'http:') return { url, origin: parsed.origin, connection: 'insecure', permissions: [] }
+  } catch {
+    return { url, connection: 'none', permissions: [] }
+  }
+  return { url, connection: 'none', permissions: [] }
+}
+
 export function isReleaseNewer(latest: string, current: string): boolean | undefined {
   const parse = (value: string): { parts: number[]; prerelease: boolean } | undefined => {
     const match = value.trim().match(/^v?(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$/)
@@ -69,6 +110,7 @@ export interface BrowserState {
   bookmarks: Bookmark[]
   history: HistoryEntry[]
   settings: BrowserSettings
+  siteInfo: SiteInfo
 }
 
 export interface ContentBounds {
@@ -105,6 +147,7 @@ export interface ArchetypeBridge {
   clearHistory(): Promise<void>
   showMenu(position: PopupPosition): Promise<void>
   showTabMenu(request: TabMenuRequest): Promise<void>
+  showSiteInfo(position: PopupPosition): Promise<void>
   getAppVersion(): Promise<string>
   checkForUpdates(force?: boolean): Promise<ReleaseStatus>
   openLatestRelease(): Promise<void>

@@ -21,6 +21,7 @@ const bridge: ArchetypeBridge = {
   clearHistory: () => ipcRenderer.invoke('browser:clear-history'),
   showMenu: (position: PopupPosition) => ipcRenderer.invoke('browser:show-menu', position),
   showTabMenu: (request: TabMenuRequest) => ipcRenderer.invoke('browser:show-tab-menu', request),
+  showSiteInfo: (position: PopupPosition) => ipcRenderer.invoke('browser:show-site-info', position),
   getAppVersion: () => ipcRenderer.invoke('browser:get-app-version'),
   checkForUpdates: (force = false) => ipcRenderer.invoke('browser:check-for-updates', force),
   openLatestRelease: () => ipcRenderer.invoke('browser:open-latest-release'),

@@ -8,7 +8,8 @@ const state: BrowserState = {
   activeTabId: 'one',
   bookmarks: [],
   history: [],
-  settings: { theme: 'system', language: 'en' }
+  settings: { theme: 'system', language: 'en' },
+  siteInfo: { url: '', connection: 'none', permissions: [] }
 }
 
 it('selects, closes, and creates tabs', () => {

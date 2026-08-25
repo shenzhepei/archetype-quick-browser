@@ -136,11 +136,15 @@ button { color: inherit; }
   background: var(--toolbar-bg);
   border-bottom: 1px solid var(--border);
 }
-.address-bar { display: grid; grid-template-columns: minmax(0, 1fr) 34px; height: 34px; border: 1px solid transparent; border-radius: 7px; background: var(--surface-muted); overflow: hidden; }
+.address-bar { display: grid; grid-template-columns: 32px minmax(0, 1fr) 34px; height: 34px; border: 1px solid transparent; border-radius: 7px; background: var(--surface-muted); overflow: hidden; }
 .address-bar:focus-within { border-color: var(--accent); background: var(--surface); box-shadow: 0 0 0 1px var(--accent); }
 .address-bar input { min-width: 0; width: 100%; padding: 0 6px 0 13px; border: 0; outline: 0; color: var(--text); background: transparent; font-size: 13px; }
 .address-action { width: 32px; height: 32px; margin: 0; color: var(--muted); }
 .address-action.is-active { color: var(--accent); }
+.site-info-button { display: grid; place-items: center; width: 32px; height: 32px; padding: 0; border: 0; background: transparent; color: var(--muted); }
+.site-info-button:hover { background: var(--hover); }
+.site-info-button.is-secure { color: #188038; }
+.site-info-button.is-insecure { color: #c5221f; }
 .avatar-button { border-radius: 50%; background: #dce7f8; color: #1f5da8; }
 :root[data-theme='dark'] .avatar-button { background: #334966; color: #b4d2ff; }
 .segmented { display: inline-grid; grid-auto-flow: column; grid-auto-columns: 1fr; min-width: 260px; padding: 2px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface-muted); }

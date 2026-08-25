@@ -12,7 +12,7 @@ const bridge = {
   checkForUpdates: vi.fn().mockResolvedValue({ currentVersion: '1.2.3', latestVersion: '1.2.4', releaseUrl: 'https://github.com/shenzhepei/archetype-quick-browser/releases/tag/v1.2.4', checkedAt: 0, state: 'update-available' }),
   openLatestRelease: vi.fn()
 } as unknown as ArchetypeBridge
-const state: BrowserState = { tabs: [], activeTabId: '', bookmarks: [], history: [], settings: { theme: 'system', language: 'en' } }
+const state: BrowserState = { tabs: [], activeTabId: '', bookmarks: [], history: [], settings: { theme: 'system', language: 'en' }, siteInfo: { url: '', connection: 'none', permissions: [] } }
 
 it('changes the appearance preference', () => {
   render(<InternalPage url="archetype://settings/appearance" state={state} bridge={bridge} />)

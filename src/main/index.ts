@@ -1,7 +1,8 @@
 import { join } from 'node:path'
-import { app, BaseWindow, ipcMain, Menu, nativeImage, nativeTheme, WebContentsView } from 'electron'
-import { BrowserController, configureSession } from './controller'
+import { app, BaseWindow, dialog, ipcMain, Menu, nativeImage, nativeTheme, session, WebContentsView } from 'electron'
+import { BrowserController } from './controller'
 import { ReleaseService } from './release'
+import { SiteSecurityService } from './site-security'
 import { BrowserStore } from './store'
 import type { BrowserSettings, ContentBounds, PopupPosition, TabMenuRequest } from '../shared/browser'
 
@@ -9,6 +10,7 @@ let mainWindow: BaseWindow | undefined
 let shellView: WebContentsView | undefined
 let controller: BrowserController | undefined
 const releaseService = new ReleaseService(() => app.getVersion())
+const siteSecurity = new SiteSecurityService()
 
 function updateWindowsTitleBar(): void {
   if (process.platform !== 'win32' || !mainWindow) return
@@ -20,8 +22,8 @@ function updateWindowsTitleBar(): void {
 }
 
 const menuLabels = {
-  en: { history: 'History', settings: 'Settings', reload: 'Reload', close: 'Close', closeOthers: 'Close other tabs', closeRight: 'Close tabs to the right' },
-  'zh-CN': { history: '历史记录', settings: '设置', reload: '重新加载', close: '关闭', closeOthers: '关闭其他标签页', closeRight: '关闭右侧标签页' }
+  en: { history: 'History', settings: 'Settings', reload: 'Reload', close: 'Close', closeOthers: 'Close other tabs', closeRight: 'Close tabs to the right', secure: 'Connection is secure', verifying: 'Checking secure connection', insecure: 'Connection is not secure', local: 'Local page', internal: 'Archetype internal page', noSite: 'No site information', certificate: 'Certificate details', permissions: 'Permissions', noPermissions: 'No permissions granted', blocked: 'Blocked', granted: 'Allowed', subject: 'Subject', issuer: 'Issuer', validFrom: 'Valid from', validUntil: 'Valid until', fingerprint: 'SHA-256 fingerprint', knownRoot: 'Issued by a known root', verification: 'Chromium verification', yes: 'Yes', no: 'No' },
+  'zh-CN': { history: '历史记录', settings: '设置', reload: '重新加载', close: '关闭', closeOthers: '关闭其他标签页', closeRight: '关闭右侧标签页', secure: '连接安全', verifying: '正在验证安全连接', insecure: '连接不安全', local: '本地页面', internal: 'Archetype 内部页面', noSite: '没有站点信息', certificate: '证书信息', permissions: '权限', noPermissions: '没有已授权权限', blocked: '已阻止', granted: '已允许', subject: '使用者', issuer: '颁发者', validFrom: '生效时间', validUntil: '到期时间', fingerprint: 'SHA-256 指纹', knownRoot: '已知根证书颁发', verification: 'Chromium 验证结果', yes: '是', no: '否' }
 } as const
 
 const menuLabel = (label: string): string => `${label}${'\u2002'.repeat(8)}`
@@ -74,6 +76,74 @@ function showTabMenu(request: TabMenuRequest): void {
   ]).popup({ window: mainWindow, x, y })
 }
 
+function showSiteInfo(position: PopupPosition): void {
+  if (!mainWindow || !controller || !Number.isFinite(position.x) || !Number.isFinite(position.y)) return
+  const state = controller.state()
+  const info = state.siteInfo
+  const labels = menuLabels[state.settings.language]
+  const connectionLabels = {
+    secure: labels.secure,
+    verifying: labels.verifying,
+    insecure: labels.insecure,
+    local: labels.local,
+    internal: labels.internal,
+    none: labels.noSite
+  }
+  const permissionLabels: Record<string, { en: string; 'zh-CN': string }> = {
+    media: { en: 'Camera and microphone', 'zh-CN': '摄像头和麦克风' },
+    geolocation: { en: 'Location', 'zh-CN': '位置信息' },
+    notifications: { en: 'Notifications', 'zh-CN': '通知' },
+    'clipboard-read': { en: 'Clipboard', 'zh-CN': '剪贴板' },
+    midi: { en: 'MIDI devices', 'zh-CN': 'MIDI 设备' },
+    fullscreen: { en: 'Fullscreen', 'zh-CN': '全屏' }
+  }
+  const iconPaths = info.connection === 'secure'
+    ? '<rect width="18" height="11" x="3" y="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>'
+    : '<path d="m21.7 16-8-14a2 2 0 0 0-3.4 0l-8 14A2 2 0 0 0 4 19h16a2 2 0 0 0 1.7-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/>'
+  const template: Electron.MenuItemConstructorOptions[] = [
+    { label: menuLabel(connectionLabels[info.connection]), icon: menuIcon(iconPaths), enabled: false }
+  ]
+  if (info.certificate) {
+    template.push({
+      label: labels.certificate,
+      click: () => showCertificateDetails(info.certificate!, state.settings.language)
+    })
+  }
+  template.push({ type: 'separator' }, { label: labels.permissions, enabled: false })
+  if (info.permissions.length === 0) {
+    template.push({ label: labels.noPermissions, enabled: false })
+  } else {
+    for (const permission of info.permissions) {
+      const name = permissionLabels[permission.permission]?.[state.settings.language] ?? permission.permission
+      template.push({ label: `${name}: ${permission.state === 'granted' ? labels.granted : labels.blocked}`, enabled: false })
+    }
+  }
+  const bounds = mainWindow.getContentBounds()
+  const x = Math.max(0, Math.min(Math.round(position.x), bounds.width))
+  const y = Math.max(0, Math.min(Math.round(position.y), bounds.height))
+  Menu.buildFromTemplate(template).popup({ window: mainWindow, x, y })
+}
+
+function showCertificateDetails(certificate: NonNullable<ReturnType<BrowserController['state']>['siteInfo']['certificate']>, language: 'en' | 'zh-CN'): void {
+  if (!mainWindow) return
+  const labels = menuLabels[language]
+  const locale = language === 'zh-CN' ? 'zh-CN' : 'en-US'
+  void dialog.showMessageBox(mainWindow, {
+    type: 'info',
+    title: labels.certificate,
+    message: certificate.subjectName,
+    detail: [
+      `${labels.subject}: ${certificate.subjectName}`,
+      `${labels.issuer}: ${certificate.issuerName}`,
+      `${labels.validFrom}: ${new Date(certificate.validStart * 1000).toLocaleString(locale)}`,
+      `${labels.validUntil}: ${new Date(certificate.validExpiry * 1000).toLocaleString(locale)}`,
+      `${labels.fingerprint}: ${certificate.fingerprint}`,
+      `${labels.knownRoot}: ${certificate.isIssuedByKnownRoot ? labels.yes : labels.no}`,
+      `${labels.verification}: ${certificate.verificationResult} (${certificate.errorCode})`
+    ].join('\n')
+  })
+}
+
 async function createWindow(): Promise<void> {
   const windowChrome =
     process.platform === 'darwin'
@@ -117,7 +187,7 @@ async function createWindow(): Promise<void> {
   layoutShell()
   mainWindow.on('resize', layoutShell)
 
-  controller = new BrowserController(mainWindow, shellView.webContents, new BrowserStore())
+  controller = new BrowserController(mainWindow, shellView.webContents, new BrowserStore(), siteSecurity)
   if (process.env.ELECTRON_RENDERER_URL) await shellView.webContents.loadURL(process.env.ELECTRON_RENDERER_URL)
   else await shellView.webContents.loadFile(join(__dirname, '../renderer/index.html'))
   await controller.initialize()
@@ -133,7 +203,7 @@ async function createWindow(): Promise<void> {
 }
 
 app.whenReady().then(async () => {
-  configureSession()
+  siteSecurity.configure(session.fromPartition('persist:archetype'), () => controller?.refreshSiteInfo())
   registerIpc()
   nativeTheme.on('updated', updateWindowsTitleBar)
   await createWindow()
@@ -169,6 +239,7 @@ function registerIpc(): void {
   ipcMain.handle('browser:clear-history', () => controller?.clearHistory())
   ipcMain.handle('browser:show-menu', (_event, position: PopupPosition) => showBrowserMenu(position))
   ipcMain.handle('browser:show-tab-menu', (_event, request: TabMenuRequest) => showTabMenu(request))
+  ipcMain.handle('browser:show-site-info', (_event, position: PopupPosition) => showSiteInfo(position))
   ipcMain.handle('browser:get-app-version', () => app.getVersion())
   ipcMain.handle('browser:check-for-updates', (_event, force?: boolean) => releaseService.check(force === true))
   ipcMain.handle('browser:open-latest-release', () => releaseService.openLatest())

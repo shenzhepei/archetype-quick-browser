@@ -7,7 +7,8 @@ const initialState: BrowserState = {
   activeTabId: '',
   bookmarks: [],
   history: [],
-  settings: { theme: 'system', language: 'en' }
+  settings: { theme: 'system', language: 'en' },
+  siteInfo: { url: '', connection: 'none', permissions: [] }
 }
 
 export function useBrowser(): { bridge: ArchetypeBridge; state: BrowserState } {

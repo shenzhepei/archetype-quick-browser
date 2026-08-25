@@ -1,4 +1,4 @@
-import { ArrowLeft, ArrowRight, EllipsisVertical, RefreshCw, Star, UserRound, X } from 'lucide-react'
+import { ArrowLeft, ArrowRight, EllipsisVertical, File, Globe2, Info, LockKeyhole, RefreshCw, Star, TriangleAlert, UserRound, X } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { ArchetypeBridge, BrowserState } from '../../shared/browser'
@@ -33,6 +33,7 @@ export function Toolbar({ state, bridge }: ToolbarProps): React.JSX.Element {
           void bridge.navigate(address)
         }}
       >
+        <SiteInfoButton state={state} bridge={bridge} />
         <input
           value={address}
           aria-label={t('addressPlaceholder')}
@@ -66,5 +67,41 @@ export function Toolbar({ state, bridge }: ToolbarProps): React.JSX.Element {
         <EllipsisVertical size={18} />
       </button>
     </div>
+  )
+}
+
+function SiteInfoButton({ state, bridge }: ToolbarProps): React.JSX.Element {
+  const { t } = useTranslation()
+  const labels = {
+    secure: t('secureConnection'),
+    verifying: t('verifyingConnection'),
+    insecure: t('insecureConnection'),
+    local: t('localPage'),
+    internal: t('internalPage'),
+    none: t('noSiteInfo')
+  }
+  const connection = state.siteInfo.connection
+  const icon = connection === 'secure'
+    ? <LockKeyhole size={15} />
+    : connection === 'insecure'
+      ? <TriangleAlert size={15} />
+      : connection === 'local'
+        ? <File size={15} />
+        : connection === 'internal'
+          ? <Info size={15} />
+          : <Globe2 size={15} />
+  return (
+    <button
+      type="button"
+      className={`site-info-button is-${connection}`}
+      aria-label={t('siteInfo')}
+      title={labels[connection]}
+      onClick={(event) => {
+        const rect = event.currentTarget.getBoundingClientRect()
+        void bridge.showSiteInfo({ x: rect.left, y: rect.bottom })
+      }}
+    >
+      {icon}
+    </button>
   )
 }
