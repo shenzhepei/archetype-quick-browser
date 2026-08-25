@@ -18,6 +18,16 @@
 | 07 | [Archetype V6 静态响应式 CSS PRD](./07-Archetype-V6-静态响应式CSS-PRD.md) | [Archetype V6 静态响应式 CSS 详设](../detailed-design/07-Archetype-V6-静态响应式CSS详设.md) |
 | 08 | [Archetype V7 Grid 与视觉 CSS PRD](./08-Archetype-V7-Grid与视觉CSS-PRD.md) | [Archetype V7 Grid 与视觉 CSS 详设](../detailed-design/08-Archetype-V7-Grid与视觉CSS详设.md) |
 
+## 补充 Feature
+
+| Feature ID | PRD | 对应详设 | 状态 | 范围 |
+|------------|-----|----------|------|------|
+| feature-01 | [浏览器外壳与本地安全体验](./feature-01.md) | [feature-01 详设](../detailed-design/feature-01.md) | 已完成 | 地址栏、标签按钮、外观设置、favicon、百度访问与 Debug 密钥 |
+| feature-02 | [标签性能与站点兼容性修复](./feature-02.md) | [feature-02 详设](../detailed-design/feature-02.md) | 已完成 | 标签常驻、HTTP 解压/UA、SVG favicon 与 `about:blank` |
+| feature-03 | [标签页加载状态提示](./feature-03.md) | [feature-03 详设](../detailed-design/feature-03.md) | 已完成 | 标签内旋转 loading 环、favicon 缩放与默认网站图标 |
+| feature-04 | [浏览器内部页与历史记录](./feature-04.md) | [feature-04 详设](../detailed-design/feature-04.md) | 已完成 | 三点主菜单、历史、设置与 `archetype://` 路由 |
+| feature-05 | [Chromium 内核迁移](./feature-05.md) | [feature-05 详设](../detailed-design/feature-05.md) | 实施中 | CEF、现代 Web 平台、GPUI 嵌入与多进程打包 |
+
 03 的当前桌面实现技术基线为 GPUI + gpui-component，采用标题栏内顶部标签页、紧凑 Space 切换和 Space 书签栏，具体工程约束以同号详设为准。
 04 定义面向 Rust 合作方的公开 SDK、独立 Runtime 和版本化 IPC 长期交付边界。
 05 定义参考浏览器 V4 的实施范围，从稳定类型提取开始，依次交付版本化 IPC、Renderer 隔离、macOS 沙箱、基础会话和 Flexbox。

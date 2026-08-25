@@ -5,6 +5,8 @@ description: Maintain Quick Browser PRD and detailed-design documents, including
 
 # Documentation Conventions
 
+This skill owns numbered version specifications. Every temporary or supplemental requirement outside an active numbered PRD must use the repository-local `feature-docs` skill and receive a paired `feature-NN.md` PRD and detailed design.
+
 ## Required layout
 
 - Store PRDs in `docs/prd/`.
@@ -20,6 +22,8 @@ description: Maintain Quick Browser PRD and detailed-design documents, including
    - `docs/detailed-design/02-Archetype-扩展系统详设.md`
 4. Determine a new number by scanning both directories and incrementing the highest existing number.
 5. Do not reuse or skip a number, and do not give paired documents different numbers.
+
+These filename rules apply to numbered version specifications. `feature-NN.md` is the deliberate exception governed by `feature-docs`.
 
 ## Document metadata and links
 
