@@ -53,12 +53,21 @@ CREATE TABLE IF NOT EXISTS page_hibernation (
   snapshot_json TEXT NOT NULL,
   updated_at INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS history_entries (
+  id TEXT PRIMARY KEY,
+  url TEXT NOT NULL,
+  title TEXT NOT NULL DEFAULT '',
+  visited_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS history_entries_visited_at
+ON history_entries(visited_at DESC, id DESC);
 INSERT OR IGNORE INTO schema_migrations(version, applied_at)
 VALUES
   (1, CAST(unixepoch('subsec') * 1000 AS INTEGER)),
   (2, CAST(unixepoch('subsec') * 1000 AS INTEGER)),
   (3, CAST(unixepoch('subsec') * 1000 AS INTEGER)),
-  (4, CAST(unixepoch('subsec') * 1000 AS INTEGER));
+  (4, CAST(unixepoch('subsec') * 1000 AS INTEGER)),
+  (5, CAST(unixepoch('subsec') * 1000 AS INTEGER));
 ";
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -74,6 +83,14 @@ pub struct Page {
     pub url: String,
     pub title: String,
     pub position: i64,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct HistoryEntry {
+    pub id: String,
+    pub url: String,
+    pub title: String,
+    pub visited_at: i64,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -123,7 +140,7 @@ pub struct Store {
 }
 
 impl Store {
-    /// Opens or creates a schema-v4 database.
+    /// Opens or creates a schema-v5 database.
     ///
     /// # Errors
     /// Returns [`StoreError`] when `SQLite` cannot open, configure, or migrate the database.
@@ -150,7 +167,7 @@ impl Store {
         Ok(Self { connection })
     }
 
-    /// Creates an isolated schema-v4 database for tests and transient use.
+    /// Creates an isolated schema-v5 database for tests and transient use.
     ///
     /// # Errors
     /// Returns [`StoreError`] when `SQLite` cannot create, configure, or migrate the database.
@@ -299,11 +316,37 @@ impl Store {
         Ok(page)
     }
 
-    /// Stores the final URL and title for a completed page navigation.
+    /// Stores the final page state and appends one visit in the same transaction.
+    ///
+    /// # Errors
+    /// Returns [`StoreError`] when `SQLite` cannot execute or commit the transaction.
+    pub fn commit_page_navigation(
+        &mut self,
+        id: &str,
+        url: &str,
+        title: &str,
+    ) -> Result<bool, StoreError> {
+        let transaction = self.connection.transaction()?;
+        let visited_at = now_ms();
+        let changed = transaction.execute(
+            "UPDATE pages SET url = ?, title = ?, last_visited_at = ? WHERE id = ?",
+            params![url, title, visited_at, id],
+        )? == 1;
+        if changed {
+            transaction.execute(
+                "INSERT INTO history_entries(id, url, title, visited_at) VALUES (?, ?, ?, ?)",
+                params![Uuid::now_v7().to_string(), url, title, visited_at],
+            )?;
+        }
+        transaction.commit()?;
+        Ok(changed)
+    }
+
+    /// Updates a page URL and title without appending browser history.
     ///
     /// # Errors
     /// Returns [`StoreError`] when `SQLite` cannot execute the update.
-    pub fn update_page_navigation(
+    pub fn update_page_metadata(
         &self,
         id: &str,
         url: &str,
@@ -313,6 +356,38 @@ impl Store {
             "UPDATE pages SET url = ?, title = ?, last_visited_at = ? WHERE id = ?",
             params![url, title, now_ms(), id],
         )? == 1)
+    }
+
+    /// Lists the most recent browser history entries.
+    ///
+    /// # Errors
+    /// Returns [`StoreError`] when `SQLite` cannot execute the query.
+    pub fn history_entries(&self, limit: usize) -> Result<Vec<HistoryEntry>, StoreError> {
+        let limit = i64::try_from(limit.min(1_000)).unwrap_or(1_000);
+        let mut statement = self.connection.prepare(
+            "SELECT id, url, title, visited_at FROM history_entries ORDER BY visited_at DESC, id DESC LIMIT ?",
+        )?;
+        let rows = statement.query_map([limit], history_entry_from_row)?;
+        Ok(rows.collect::<Result<Vec<_>, _>>()?)
+    }
+
+    /// Deletes one browser history entry and reports whether it existed.
+    ///
+    /// # Errors
+    /// Returns [`StoreError`] when `SQLite` cannot execute the delete.
+    pub fn delete_history_entry(&self, id: &str) -> Result<bool, StoreError> {
+        Ok(self
+            .connection
+            .execute("DELETE FROM history_entries WHERE id = ?", [id])?
+            == 1)
+    }
+
+    /// Removes all browser history and returns the number of deleted entries.
+    ///
+    /// # Errors
+    /// Returns [`StoreError`] when `SQLite` cannot execute the delete.
+    pub fn clear_history(&self) -> Result<usize, StoreError> {
+        Ok(self.connection.execute("DELETE FROM history_entries", [])?)
     }
 
     /// Deletes a page and compacts positions within its Space.
@@ -644,6 +719,15 @@ fn bookmark_from_row(row: &rusqlite::Row<'_>) -> Result<Bookmark, rusqlite::Erro
     })
 }
 
+fn history_entry_from_row(row: &rusqlite::Row<'_>) -> Result<HistoryEntry, rusqlite::Error> {
+    Ok(HistoryEntry {
+        id: row.get(0)?,
+        url: row.get(1)?,
+        title: row.get(2)?,
+        visited_at: row.get(3)?,
+    })
+}
+
 fn is_corruption(error: &StoreError) -> bool {
     matches!(
         error,
@@ -686,7 +770,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn initializes_empty_database_through_schema_v4() {
+    fn initializes_empty_database_through_schema_v5() {
         let store = Store::in_memory().unwrap();
         let mut statement = store
             .connection
@@ -697,7 +781,58 @@ mod tests {
             .unwrap()
             .collect::<Result<Vec<_>, _>>()
             .unwrap();
-        assert_eq!(versions, [1, 2, 3, 4]);
+        assert_eq!(versions, [1, 2, 3, 4, 5]);
+    }
+
+    #[test]
+    fn commits_lists_deletes_and_clears_navigation_history() {
+        let mut store = Store::in_memory().unwrap();
+        let page = store.create_page("about:blank").unwrap();
+
+        assert!(
+            store
+                .commit_page_navigation(&page.id, "https://first.example/", "First")
+                .unwrap()
+        );
+        assert!(
+            store
+                .commit_page_navigation(&page.id, "https://second.example/", "Second")
+                .unwrap()
+        );
+        assert!(
+            !store
+                .commit_page_navigation("missing", "https://ignored.example/", "Ignored")
+                .unwrap()
+        );
+
+        let entries = store.history_entries(10).unwrap();
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].title, "Second");
+        assert_eq!(entries[1].title, "First");
+        assert_eq!(store.history_entries(1).unwrap().len(), 1);
+
+        assert!(store.delete_history_entry(&entries[0].id).unwrap());
+        assert!(!store.delete_history_entry("missing").unwrap());
+        assert_eq!(store.clear_history().unwrap(), 1);
+        assert!(store.history_entries(10).unwrap().is_empty());
+    }
+
+    #[test]
+    fn internal_page_metadata_does_not_append_history() {
+        let mut store = Store::in_memory().unwrap();
+        let page = store
+            .create_page("archetype://settings/appearance")
+            .unwrap();
+
+        assert!(
+            store
+                .update_page_metadata(&page.id, "archetype://settings/about", "Settings")
+                .unwrap()
+        );
+        let restored = store.pages().unwrap();
+        assert_eq!(restored[0].url, "archetype://settings/about");
+        assert_eq!(restored[0].title, "Settings");
+        assert!(store.history_entries(10).unwrap().is_empty());
     }
 
     #[test]
@@ -830,7 +965,7 @@ mod tests {
     }
 
     #[test]
-    fn upgrades_schema_v2_to_v4_without_losing_profile_data() {
+    fn upgrades_schema_v2_to_v5_without_losing_profile_data() {
         let directory = std::env::temp_dir().join(format!("archetype-store-{}", Uuid::now_v7()));
         fs::create_dir(&directory).unwrap();
         let path = directory.join("profile.db");
@@ -864,7 +999,7 @@ mod tests {
                 row.get(0)
             })
             .unwrap();
-        assert_eq!(version, 4);
+        assert_eq!(version, 5);
         drop(store);
         fs::remove_dir_all(directory).unwrap();
     }

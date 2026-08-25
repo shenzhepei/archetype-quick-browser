@@ -134,23 +134,38 @@ pub fn load_favicon_with_cookies(
         .flatten()
         .and_then(|value| base.join(value).ok())
     });
-    let favicon = explicit_favicon.or_else(|| default_favicon_url(base))?;
-    if !same_origin(base, &favicon) {
-        return None;
-    }
-    let response = loader
-        .load_with_cookies(
+    let default_favicon = default_favicon_url(base);
+    for favicon in [explicit_favicon, default_favicon].into_iter().flatten() {
+        if !same_origin(base, &favicon) {
+            continue;
+        }
+        let Ok(response) = loader.load_with_cookies(
             &favicon,
             FAVICON_BYTE_LIMIT,
             cookie_jar,
             top_level_url,
             false,
-        )
-        .ok()?;
-    if !same_origin(base, &response.final_url) {
-        return None;
+        ) else {
+            continue;
+        };
+        if !same_origin(base, &response.final_url) {
+            continue;
+        }
+        if let Some(favicon) = normalized_favicon(&response.body) {
+            return Some(favicon);
+        }
     }
-    let decoded = image::load_from_memory(&response.body).ok()?;
+    None
+}
+
+fn normalized_favicon(bytes: &[u8]) -> Option<Vec<u8>> {
+    if str::from_utf8(bytes).ok().is_some_and(|source| {
+        let source = source.trim_start();
+        source.starts_with("<svg") || source.starts_with("<?xml") && source.contains("<svg")
+    }) {
+        return Some(bytes.to_vec());
+    }
+    let decoded = image::load_from_memory(bytes).ok()?;
     let mut png = Cursor::new(Vec::new());
     decoded
         .thumbnail(32, 32)
@@ -530,6 +545,28 @@ mod tests {
         server.join().unwrap();
         let decoded = image::load_from_memory(&favicon).unwrap();
         assert_eq!((decoded.width(), decoded.height()), (32, 32));
+    }
+
+    #[test]
+    fn preserves_bounded_svg_favicon_for_gpui() {
+        let favicon = b"<?xml version='1.0'?><svg xmlns='http://www.w3.org/2000/svg'><rect width='16' height='16'/></svg>";
+
+        assert_eq!(
+            normalized_favicon(favicon).as_deref(),
+            Some(favicon.as_slice())
+        );
+    }
+
+    #[test]
+    fn normalizes_ico_favicon_to_png() {
+        let mut source = Cursor::new(Vec::new());
+        image::DynamicImage::new_rgba8(16, 16)
+            .write_to(&mut source, image::ImageFormat::Ico)
+            .unwrap();
+
+        let favicon = normalized_favicon(&source.into_inner()).unwrap();
+
+        assert!(favicon.starts_with(b"\x89PNG\r\n\x1a\n"));
     }
 
     #[test]

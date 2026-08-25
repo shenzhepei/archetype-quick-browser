@@ -20,9 +20,10 @@ use arch_paint::{DisplayCommand, PaintColor, TextDecoration};
 use arch_session::Viewport;
 use arch_session::cookies::CookieJar;
 use arch_session::forms::{ControlId, ControlKind, FormMethod, FormSubmission};
-use arch_store::{Bookmark, BookmarkKind, Page, Space};
+use arch_store::{Bookmark, BookmarkKind, HistoryEntry, Page, Space};
 use arch_style::{FontStyle as PageFontStyle, FontWeight as PageFontWeight, TextAlign};
 use archetype_sdk::runtime_client::RuntimeSupervisor;
+use chrono::{DateTime, Local, Utc};
 use gpui::{
     AnyElement, AppContext as _, Application, AssetSource, BoxShadow, Context, Entity, FontWeight,
     InteractiveElement as _, IntoElement, ParentElement, Render, ScrollHandle, SharedString,
@@ -38,11 +39,20 @@ use gpui_component::{
     input::{Input, InputEvent, InputState},
     menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenu, PopupMenuItem},
     radio::Radio,
+    scroll::ScrollableElement as _,
+    spinner::Spinner,
     v_flex,
 };
 use url::Url;
 
 use crate::{i18n::Language, logging};
+
+const ABOUT_BLANK: &str = "about:blank";
+const ARCHETYPE_HISTORY: &str = "archetype://history";
+const ARCHETYPE_SETTINGS_APPEARANCE: &str = "archetype://settings/appearance";
+const ARCHETYPE_SETTINGS_ABOUT: &str = "archetype://settings/about";
+const HISTORY_PAGE_LIMIT: usize = 1_000;
+const MAX_RESIDENT_RENDERED_PAGES: usize = 8;
 
 struct Assets;
 
@@ -119,6 +129,13 @@ enum AppIcon {
     Rename,
     Alert,
     Star,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum TabIconMode {
+    Default,
+    Favicon,
+    Loading,
 }
 
 impl IconNamed for AppIcon {
@@ -238,6 +255,7 @@ struct QuickBrowser {
     runtime: Option<Arc<RuntimeSupervisor>>,
     spaces: Vec<Space>,
     bookmarks: Vec<Bookmark>,
+    history_entries: Vec<HistoryEntry>,
     pages: Vec<Page>,
     selected_space: Option<String>,
     selected_page: Option<String>,
@@ -253,6 +271,7 @@ struct QuickBrowser {
     address_input: Entity<InputState>,
     space_input: Entity<InputState>,
     folder_input: Entity<InputState>,
+    history_filter: Entity<InputState>,
     renaming_space: bool,
     creating_bookmark_folder: bool,
     bookmark_folder_parent: Option<String>,
@@ -270,6 +289,21 @@ struct FormControlKey {
 struct CompletedRender {
     rendered: RenderedPage,
     cookie_jar: Option<CookieJar>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum SettingsSection {
+    Appearance,
+    About,
+}
+
+impl SettingsSection {
+    const fn url(self) -> &'static str {
+        match self {
+            Self::Appearance => ARCHETYPE_SETTINGS_APPEARANCE,
+            Self::About => ARCHETYPE_SETTINGS_ABOUT,
+        }
+    }
 }
 
 impl QuickBrowser {
@@ -299,6 +333,7 @@ impl QuickBrowser {
             .as_deref()
             .and_then(|id| core.bookmarks(id, None).ok())
             .unwrap_or_default();
+        let history_entries = core.history_entries(HISTORY_PAGE_LIMIT).unwrap_or_default();
         let pages = core.pages().unwrap_or_default();
         let hibernated_pages = pages
             .iter()
@@ -328,9 +363,17 @@ impl QuickBrowser {
         space_input.update(cx, |input, cx| input.set_value(space_name, window, cx));
         let folder_input = cx
             .new(|cx| InputState::new(window, cx).placeholder(language.folder_name_placeholder()));
+        let history_filter =
+            cx.new(|cx| InputState::new(window, cx).placeholder(language.search_history()));
 
-        let subscriptions =
-            Self::input_subscriptions(window, cx, &address_input, &space_input, &folder_input);
+        let subscriptions = Self::input_subscriptions(
+            window,
+            cx,
+            &address_input,
+            &space_input,
+            &folder_input,
+            &history_filter,
+        );
 
         Self {
             language,
@@ -339,6 +382,7 @@ impl QuickBrowser {
             runtime,
             spaces,
             bookmarks,
+            history_entries,
             pages,
             selected_space,
             selected_page,
@@ -354,6 +398,7 @@ impl QuickBrowser {
             address_input,
             space_input,
             folder_input,
+            history_filter,
             renaming_space: false,
             creating_bookmark_folder: false,
             bookmark_folder_parent: None,
@@ -368,6 +413,7 @@ impl QuickBrowser {
         address_input: &Entity<InputState>,
         space_input: &Entity<InputState>,
         folder_input: &Entity<InputState>,
+        history_filter: &Entity<InputState>,
     ) -> Vec<Subscription> {
         vec![
             cx.observe_window_appearance(window, |this, window, cx| {
@@ -388,6 +434,11 @@ impl QuickBrowser {
             cx.subscribe_in(folder_input, window, |this, _, event, _window, cx| {
                 if matches!(event, InputEvent::PressEnter { .. }) {
                     this.save_bookmark_editor(cx);
+                }
+            }),
+            cx.subscribe_in(history_filter, window, |_, _, event, _, cx| {
+                if matches!(event, InputEvent::Change) {
+                    cx.notify();
                 }
             }),
         ]
@@ -543,7 +594,7 @@ impl QuickBrowser {
     }
 
     fn add_page(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let url = fixture_url();
+        let url = blank_url();
         match self.core.create_page(&url) {
             Ok(page) => {
                 self.selected_page = Some(page.id.clone());
@@ -551,7 +602,139 @@ impl QuickBrowser {
                 self.scroll_to_selected_tab();
                 self.set_address(url.to_string(), window, cx);
                 self.persist_selection();
-                self.navigate_to(&url, window, cx);
+                cx.notify();
+            }
+            Err(error) => {
+                self.error = Some(ErrorView::application(self.language, &error));
+                cx.notify();
+            }
+        }
+    }
+
+    fn open_history_page(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(page_id) = self
+            .pages
+            .iter()
+            .find(|page| is_history_page(page))
+            .map(|page| page.id.clone())
+        {
+            self.select_page(&page_id, window, cx);
+            self.refresh_history(cx);
+            return;
+        }
+
+        let url = history_url();
+        match self.core.create_page(&url) {
+            Ok(page) => {
+                self.selected_page = Some(page.id.clone());
+                self.pages.push(page);
+                self.scroll_to_selected_tab();
+                self.set_address(url.to_string(), window, cx);
+                self.persist_selection();
+                self.refresh_history(cx);
+            }
+            Err(error) => {
+                self.error = Some(ErrorView::application(self.language, &error));
+                cx.notify();
+            }
+        }
+    }
+
+    fn open_settings_page(
+        &mut self,
+        section: SettingsSection,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let url = Url::parse(section.url()).expect("settings route must be valid");
+        if let Some(index) = self.pages.iter().position(is_settings_page) {
+            let page = self.pages[index].clone();
+            match self
+                .core
+                .update_internal_page(&page, &url, self.language.settings())
+            {
+                Ok(true) => {
+                    self.pages[index].url = url.to_string();
+                    self.language
+                        .settings()
+                        .clone_into(&mut self.pages[index].title);
+                    let page_id = self.pages[index].id.clone();
+                    self.select_page(&page_id, window, cx);
+                }
+                Ok(false) => {
+                    self.error = Some(ErrorView::input(
+                        self.language,
+                        self.language.selected_page_missing(),
+                    ));
+                    cx.notify();
+                }
+                Err(error) => {
+                    self.error = Some(ErrorView::application(self.language, &error));
+                    cx.notify();
+                }
+            }
+            return;
+        }
+
+        match self.core.create_page(&url) {
+            Ok(mut page) => {
+                if let Err(error) =
+                    self.core
+                        .update_internal_page(&page, &url, self.language.settings())
+                {
+                    self.error = Some(ErrorView::application(self.language, &error));
+                    cx.notify();
+                    return;
+                }
+                self.language.settings().clone_into(&mut page.title);
+                self.selected_page = Some(page.id.clone());
+                self.pages.push(page);
+                self.scroll_to_selected_tab();
+                self.set_address(url.to_string(), window, cx);
+                self.persist_selection();
+                cx.notify();
+            }
+            Err(error) => {
+                self.error = Some(ErrorView::application(self.language, &error));
+                cx.notify();
+            }
+        }
+    }
+
+    fn refresh_history(&mut self, cx: &mut Context<Self>) {
+        match self.core.history_entries(HISTORY_PAGE_LIMIT) {
+            Ok(entries) => self.history_entries = entries,
+            Err(error) => self.error = Some(ErrorView::application(self.language, &error)),
+        }
+        cx.notify();
+    }
+
+    fn delete_history_entry(&mut self, id: &str, cx: &mut Context<Self>) {
+        match self.core.delete_history_entry(id) {
+            Ok(true) => self.history_entries.retain(|entry| entry.id != id),
+            Ok(false) => {}
+            Err(error) => self.error = Some(ErrorView::application(self.language, &error)),
+        }
+        cx.notify();
+    }
+
+    fn clear_history(&mut self, cx: &mut Context<Self>) {
+        match self.core.clear_history() {
+            Ok(_) => self.history_entries.clear(),
+            Err(error) => self.error = Some(ErrorView::application(self.language, &error)),
+        }
+        cx.notify();
+    }
+
+    fn open_url_in_new_page(&mut self, url: &Url, window: &mut Window, cx: &mut Context<Self>) {
+        match self.core.create_page(url) {
+            Ok(page) => {
+                self.selected_page = Some(page.id.clone());
+                self.pages.push(page);
+                self.scroll_to_selected_tab();
+                self.set_address(url.to_string(), window, cx);
+                self.persist_selection();
+                self.navigate_to(url, window, cx);
             }
             Err(error) => {
                 self.error = Some(ErrorView::application(self.language, &error));
@@ -562,7 +745,8 @@ impl QuickBrowser {
 
     fn select_page(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
         self.error = None;
-        if self.selected_page.as_deref() != Some(id) {
+        if should_hibernate_on_switch(self.selected_page.as_deref(), id, self.rendered_pages.len())
+        {
             self.hibernate_selected_page();
         }
         self.selected_page = Some(id.to_owned());
@@ -579,6 +763,7 @@ impl QuickBrowser {
                 self.wake_hibernated_page(&page, window, cx);
             } else if !self.rendered_pages.contains_key(&page.id)
                 && !self.loading_pages.contains(&page.id)
+                && !is_internal_page(&page)
             {
                 self.reload_page(page, window, cx);
             } else {
@@ -617,18 +802,14 @@ impl QuickBrowser {
     }
 
     fn wake_hibernated_page(&mut self, page: &Page, window: &mut Window, cx: &mut Context<Self>) {
-        let scroll_y = self
-            .core
-            .page_hibernation(page)
-            .ok()
-            .flatten()
-            .map_or(0.0, |snapshot| snapshot.scroll_y);
-        match self.core.wake_page(page, 960.0) {
-            Ok(rendered) => {
+        match self.core.resume_page(page) {
+            Ok(snapshot) => {
                 self.hibernated_pages.remove(&page.id);
-                self.apply_rendered(page, rendered, window, cx);
-                self.content_scroll
-                    .set_offset(point(px(0.0), px(-scroll_y)));
+                self.reload_page(page.clone(), window, cx);
+                self.content_scroll.set_offset(point(
+                    px(0.0),
+                    px(-snapshot.map_or(0.0, |item| item.scroll_y)),
+                ));
             }
             Err(error) => {
                 self.error = Some(ErrorView::navigation(self.language, &error));
@@ -668,6 +849,7 @@ impl QuickBrowser {
             if let Some(page) = next_page
                 && !self.rendered_pages.contains_key(&page.id)
                 && !self.loading_pages.contains(&page.id)
+                && !is_internal_page(&page)
             {
                 self.reload_page(page, window, cx);
             }
@@ -679,6 +861,9 @@ impl QuickBrowser {
     fn navigate_current(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let address = self.address_input.read(cx).value();
         match parse_address(&address, self.language) {
+            Ok(url) if self.selected_page_record().is_some_and(is_internal_page) => {
+                self.open_url_in_new_page(&url, window, cx);
+            }
             Ok(url) => self.navigate_to(&url, window, cx),
             Err(error) => {
                 self.error = Some(ErrorView::input(self.language, error));
@@ -749,7 +934,13 @@ impl QuickBrowser {
     fn restore_selected_page(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.scroll_to_selected_tab();
         if let Some(page) = self.selected_page_record().cloned() {
-            self.reload_page(page, window, cx);
+            if is_internal_page(&page) {
+                cx.notify();
+            } else if self.hibernated_pages.contains(&page.id) {
+                self.wake_hibernated_page(&page, window, cx);
+            } else {
+                self.reload_page(page, window, cx);
+            }
         }
     }
 
@@ -891,7 +1082,12 @@ impl QuickBrowser {
                 }
                 let rendered = completed.rendered;
                 match self.core.finish_navigation(page, pending, &rendered) {
-                    Ok(true) => self.apply_rendered(page, rendered, window, cx),
+                    Ok(true) => {
+                        if let Ok(entries) = self.core.history_entries(HISTORY_PAGE_LIMIT) {
+                            self.history_entries = entries;
+                        }
+                        self.apply_rendered(page, rendered, window, cx);
+                    }
                     Ok(false) => cx.notify(),
                     Err(error) => {
                         self.error = Some(ErrorView::application(self.language, &error));
@@ -1368,7 +1564,11 @@ impl QuickBrowser {
             let select_id = page.id.clone();
             let close_id = page.id.clone();
             let active = self.selected_page.as_deref() == Some(page.id.as_str());
-            let label = if page.title.is_empty() {
+            let label = if is_history_page(page) {
+                self.language.history().to_owned()
+            } else if is_settings_page(page) {
+                self.language.settings().to_owned()
+            } else if page.title.is_empty() {
                 page.url.clone()
             } else {
                 page.title.clone()
@@ -1378,6 +1578,7 @@ impl QuickBrowser {
                 .get(&page.id)
                 .and_then(|rendered| rendered.favicon_png.as_deref())
                 .map(image_source);
+            let icon_mode = tab_icon_mode(self.loading_pages.contains(&page.id), favicon.is_some());
             h_flex()
                 .id(SharedString::from(format!("tab-{}", page.id)))
                 .h(px(28.0))
@@ -1400,8 +1601,8 @@ impl QuickBrowser {
                     cx.theme().tab_bar
                 })
                 .rounded(cx.theme().radius)
-                .when_some(favicon, |tab, favicon| {
-                    tab.child(img(favicon).w(px(16.0)).h(px(16.0)))
+                .when_some(tab_site_icon(icon_mode, favicon, cx), |tab, icon| {
+                    tab.child(icon)
                 })
                 .child(
                     div()
@@ -1616,9 +1817,12 @@ impl QuickBrowser {
 
     fn toolbar(&self, cx: &mut Context<Self>) -> AnyElement {
         let current = self.selected_page_record();
+        let current_is_internal = current.is_some_and(is_internal_page);
         let loading = current.is_some_and(|page| self.loading_pages.contains(&page.id));
-        let can_back = current.is_some_and(|page| self.core.can_go_back(page));
-        let can_forward = current.is_some_and(|page| self.core.can_go_forward(page));
+        let can_back =
+            !current_is_internal && current.is_some_and(|page| self.core.can_go_back(page));
+        let can_forward =
+            !current_is_internal && current.is_some_and(|page| self.core.can_go_forward(page));
         h_flex()
             .h(px(54.0))
             .w_full()
@@ -1660,13 +1864,14 @@ impl QuickBrowser {
                     .ghost()
                     .icon(AppIcon::Refresh)
                     .tooltip(self.language.reload())
-                    .disabled(current.is_none())
+                    .disabled(current.is_none() || current_is_internal)
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.navigate_history(HistoryDirection::Reload, window, cx);
                     }))
             })
-            .child(self.address_control(current.is_some(), cx))
+            .child(self.address_control(current.is_some() && !current_is_internal, cx))
             .child(self.appearance_control(cx))
+            .child(self.main_menu_control(cx))
             .into_any_element()
     }
 
@@ -1722,36 +1927,50 @@ impl QuickBrowser {
     }
 
     fn appearance_control(&self, cx: &mut Context<Self>) -> AnyElement {
-        let settings_browser = cx.entity();
+        let browser = cx.entity();
         let language = self.language;
-        let appearance = self.appearance;
         Button::new("profile-settings")
             .ghost()
             .icon(IconName::CircleUser)
             .tooltip(language.settings())
+            .on_click(move |_, window, cx| {
+                browser.update(cx, |this, cx| {
+                    this.open_settings_page(SettingsSection::Appearance, window, cx);
+                });
+            })
+            .into_any_element()
+    }
+
+    fn main_menu_control(&self, cx: &mut Context<Self>) -> AnyElement {
+        let browser = cx.entity();
+        let language = self.language;
+        Button::new("main-menu")
+            .ghost()
+            .icon(IconName::EllipsisVertical)
+            .tooltip(language.main_menu())
             .dropdown_menu(move |menu, _, _| {
-                let system_browser = settings_browser.clone();
-                let light_browser = settings_browser.clone();
-                let dark_browser = settings_browser.clone();
-                menu.item(PopupMenuItem::label(language.appearance()))
-                    .item(appearance_menu_item(
-                        language.system_appearance(),
-                        appearance == AppearancePreference::System,
-                        AppearancePreference::System,
-                        system_browser,
-                    ))
-                    .item(appearance_menu_item(
-                        language.light_appearance(),
-                        appearance == AppearancePreference::Light,
-                        AppearancePreference::Light,
-                        light_browser,
-                    ))
-                    .item(appearance_menu_item(
-                        language.dark_appearance(),
-                        appearance == AppearancePreference::Dark,
-                        AppearancePreference::Dark,
-                        dark_browser,
-                    ))
+                let settings_browser = browser.clone();
+                menu.item(
+                    PopupMenuItem::new(language.history())
+                        .icon(Icon::new(IconName::BookOpen))
+                        .on_click({
+                            let browser = browser.clone();
+                            move |_, window, cx| {
+                                browser.update(cx, |this, cx| {
+                                    this.open_history_page(window, cx);
+                                });
+                            }
+                        }),
+                )
+                .item(
+                    PopupMenuItem::new(language.settings())
+                        .icon(Icon::new(IconName::Settings))
+                        .on_click(move |_, window, cx| {
+                            settings_browser.update(cx, |this, cx| {
+                                this.open_settings_page(SettingsSection::Appearance, window, cx);
+                            });
+                        }),
+                )
             })
             .into_any_element()
     }
@@ -1774,11 +1993,20 @@ impl QuickBrowser {
                 )
                 .into_any_element();
         }
+        if self.selected_page_record().is_some_and(is_history_page) {
+            return self.history_content(cx);
+        }
+        if self.selected_page_record().is_some_and(is_settings_page) {
+            return self.settings_content(cx);
+        }
         let Some(rendered) = self
             .selected_page
             .as_ref()
             .and_then(|page_id| self.rendered_pages.get(page_id))
         else {
+            if self.selected_page_record().is_some_and(is_blank_page) {
+                return div().size_full().into_any_element();
+            }
             return v_flex()
                 .size_full()
                 .items_center()
@@ -1845,6 +2073,330 @@ impl QuickBrowser {
             .when_some(diagnostics, |content, diagnostics| {
                 content.child(diagnostics)
             })
+            .into_any_element()
+    }
+
+    fn history_content(&self, cx: &mut Context<Self>) -> AnyElement {
+        let query = self.history_filter.read(cx).value().trim().to_owned();
+        let entries = self
+            .history_entries
+            .iter()
+            .filter(|entry| history_entry_matches(entry, &query))
+            .cloned()
+            .collect::<Vec<_>>();
+        let has_filtered_entries = !entries.is_empty();
+        let has_entries = !self.history_entries.is_empty();
+        let empty_message = if has_entries {
+            self.language.no_history_matches()
+        } else {
+            self.language.no_history()
+        };
+        let browser = cx.entity();
+        let rows = entries
+            .into_iter()
+            .map(|entry| self.history_entry_row(entry, cx))
+            .collect::<Vec<_>>();
+        let clear_browser = browser.clone();
+
+        v_flex()
+            .size_full()
+            .items_center()
+            .bg(cx.theme().background)
+            .child(
+                v_flex()
+                    .size_full()
+                    .max_w(px(960.0))
+                    .child(
+                        h_flex()
+                            .h(px(64.0))
+                            .px_4()
+                            .justify_between()
+                            .border_b_1()
+                            .border_color(cx.theme().border)
+                            .child(
+                                div()
+                                    .text_xl()
+                                    .font_semibold()
+                                    .child(self.language.history()),
+                            )
+                            .child(
+                                Button::new("clear-history")
+                                    .ghost()
+                                    .icon(AppIcon::Delete)
+                                    .label(self.language.clear_history())
+                                    .disabled(!has_entries)
+                                    .on_click(move |_, _, cx| {
+                                        clear_browser.update(cx, |this, cx| {
+                                            this.clear_history(cx);
+                                        });
+                                    }),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .px_4()
+                            .py_3()
+                            .border_b_1()
+                            .border_color(cx.theme().border)
+                            .child(
+                                div().rounded_lg().bg(cx.theme().secondary).child(
+                                    Input::new(&self.history_filter)
+                                        .appearance(false)
+                                        .cleanable(true)
+                                        .prefix(Icon::new(IconName::Search)),
+                                ),
+                            ),
+                    )
+                    .child(
+                        v_flex()
+                            .flex_1()
+                            .w_full()
+                            .overflow_y_scrollbar()
+                            .when(!has_filtered_entries, |list| {
+                                list.items_center().justify_center().child(
+                                    div()
+                                        .text_sm()
+                                        .text_color(cx.theme().muted_foreground)
+                                        .child(empty_message),
+                                )
+                            })
+                            .children(rows),
+                    ),
+            )
+            .into_any_element()
+    }
+
+    fn history_entry_row(&self, entry: HistoryEntry, cx: &mut Context<Self>) -> AnyElement {
+        let open_url = entry.url.clone();
+        let delete_id = entry.id.clone();
+        let open_browser = cx.entity();
+        let delete_browser = open_browser.clone();
+        let title = if entry.title.trim().is_empty() {
+            entry.url.clone()
+        } else {
+            entry.title.clone()
+        };
+        h_flex()
+            .id(SharedString::from(format!("history-entry-{}", entry.id)))
+            .w_full()
+            .min_h(px(64.0))
+            .px_3()
+            .gap_3()
+            .border_b_1()
+            .border_color(cx.theme().border)
+            .cursor_pointer()
+            .hover(|this| this.bg(cx.theme().accent.opacity(0.45)))
+            .child(
+                v_flex()
+                    .flex_1()
+                    .min_w_0()
+                    .gap_1()
+                    .child(
+                        div()
+                            .w_full()
+                            .truncate()
+                            .text_sm()
+                            .font_medium()
+                            .child(title),
+                    )
+                    .child(
+                        div()
+                            .w_full()
+                            .truncate()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(entry.url),
+                    ),
+            )
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(format_history_time(entry.visited_at)),
+            )
+            .child(
+                Button::new(SharedString::from(format!(
+                    "delete-history-entry-{}",
+                    entry.id
+                )))
+                .ghost()
+                .xsmall()
+                .icon(AppIcon::Delete)
+                .tooltip(self.language.delete_history_entry())
+                .on_click(move |_, _, cx| {
+                    cx.stop_propagation();
+                    delete_browser.update(cx, |this, cx| {
+                        this.delete_history_entry(&delete_id, cx);
+                    });
+                }),
+            )
+            .on_click(move |_, window, cx| {
+                open_browser.update(cx, |this, cx| {
+                    if let Ok(url) = Url::parse(&open_url) {
+                        this.open_url_in_new_page(&url, window, cx);
+                    }
+                });
+            })
+            .into_any_element()
+    }
+
+    fn settings_content(&self, cx: &mut Context<Self>) -> AnyElement {
+        let section = self
+            .selected_page_record()
+            .and_then(settings_section)
+            .unwrap_or(SettingsSection::Appearance);
+        let content = match section {
+            SettingsSection::Appearance => self.appearance_settings(cx),
+            SettingsSection::About => self.about_settings(cx),
+        };
+        h_flex()
+            .size_full()
+            .items_start()
+            .bg(cx.theme().background)
+            .child(self.settings_navigation(section, cx))
+            .child(
+                v_flex()
+                    .flex_1()
+                    .h_full()
+                    .overflow_y_scrollbar()
+                    .p_8()
+                    .items_center()
+                    .child(content),
+            )
+            .into_any_element()
+    }
+
+    fn settings_navigation(&self, section: SettingsSection, cx: &mut Context<Self>) -> AnyElement {
+        let browser = cx.entity();
+        let appearance_browser = browser.clone();
+        v_flex()
+            .h_full()
+            .w(px(220.0))
+            .flex_shrink_0()
+            .p_3()
+            .gap_1()
+            .border_r_1()
+            .border_color(cx.theme().border)
+            .bg(cx.theme().sidebar)
+            .child(
+                div()
+                    .h(px(44.0))
+                    .px_2()
+                    .flex()
+                    .items_center()
+                    .text_lg()
+                    .font_semibold()
+                    .child(self.language.settings()),
+            )
+            .child(
+                Button::new("settings-appearance")
+                    .ghost()
+                    .w_full()
+                    .icon(IconName::Palette)
+                    .label(self.language.appearance())
+                    .when(section == SettingsSection::Appearance, |button| {
+                        button.bg(cx.theme().accent)
+                    })
+                    .on_click(move |_, window, cx| {
+                        appearance_browser.update(cx, |this, cx| {
+                            this.open_settings_page(SettingsSection::Appearance, window, cx);
+                        });
+                    }),
+            )
+            .child(
+                Button::new("settings-about")
+                    .ghost()
+                    .w_full()
+                    .icon(IconName::Info)
+                    .label(self.language.about_archetype())
+                    .when(section == SettingsSection::About, |button| {
+                        button.bg(cx.theme().accent)
+                    })
+                    .on_click(move |_, window, cx| {
+                        browser.update(cx, |this, cx| {
+                            this.open_settings_page(SettingsSection::About, window, cx);
+                        });
+                    }),
+            )
+            .into_any_element()
+    }
+
+    fn appearance_settings(&self, cx: &mut Context<Self>) -> AnyElement {
+        v_flex()
+            .w_full()
+            .max_w(px(720.0))
+            .gap_5()
+            .child(
+                div()
+                    .text_xl()
+                    .font_semibold()
+                    .child(self.language.appearance()),
+            )
+            .child(
+                v_flex()
+                    .gap_4()
+                    .child(self.appearance_radio(
+                        "appearance-system",
+                        self.language.system_appearance(),
+                        AppearancePreference::System,
+                        cx,
+                    ))
+                    .child(self.appearance_radio(
+                        "appearance-light",
+                        self.language.light_appearance(),
+                        AppearancePreference::Light,
+                        cx,
+                    ))
+                    .child(self.appearance_radio(
+                        "appearance-dark",
+                        self.language.dark_appearance(),
+                        AppearancePreference::Dark,
+                        cx,
+                    )),
+            )
+            .into_any_element()
+    }
+
+    fn appearance_radio(
+        &self,
+        id: &'static str,
+        label: &'static str,
+        preference: AppearancePreference,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let browser = cx.entity();
+        Radio::new(id)
+            .label(label)
+            .checked(self.appearance == preference)
+            .on_click(move |checked, window, cx| {
+                if *checked {
+                    browser.update(cx, |this, cx| {
+                        this.set_appearance(preference, window, cx);
+                    });
+                }
+            })
+            .into_any_element()
+    }
+
+    fn about_settings(&self, _: &mut Context<Self>) -> AnyElement {
+        v_flex()
+            .w_full()
+            .max_w(px(720.0))
+            .gap_5()
+            .child(
+                div()
+                    .text_xl()
+                    .font_semibold()
+                    .child(self.language.about_archetype()),
+            )
+            .child(div().text_2xl().font_semibold().child("Archetype"))
+            .child(
+                h_flex()
+                    .gap_2()
+                    .text_sm()
+                    .child(self.language.version())
+                    .child(env!("CARGO_PKG_VERSION")),
+            )
             .into_any_element()
     }
 
@@ -2208,21 +2760,6 @@ fn apply_appearance(appearance: AppearancePreference, window: &mut Window, cx: &
     }
 }
 
-fn appearance_menu_item(
-    label: &'static str,
-    checked: bool,
-    appearance: AppearancePreference,
-    browser: Entity<QuickBrowser>,
-) -> PopupMenuItem {
-    PopupMenuItem::new(label)
-        .checked(checked)
-        .on_click(move |_, window, cx| {
-            browser.update(cx, |this, cx| {
-                this.set_appearance(appearance, window, cx);
-            });
-        })
-}
-
 fn start_runtime() -> Option<Arc<RuntimeSupervisor>> {
     let executable = std::env::var_os("ARCHETYPE_RUNTIME_PATH")
         .map(PathBuf::from)
@@ -2252,12 +2789,137 @@ fn start_runtime() -> Option<Arc<RuntimeSupervisor>> {
     }
 }
 
-fn fixture_url() -> Url {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../fixtures/pages/01-document/index.html")
-        .canonicalize()
-        .unwrap_or_else(|_| PathBuf::from("fixtures/pages/01-document/index.html"));
-    Url::from_file_path(path).expect("fixture path must be representable as a URL")
+fn blank_url() -> Url {
+    Url::parse(ABOUT_BLANK).expect("about:blank must be a valid URL")
+}
+
+fn history_url() -> Url {
+    Url::parse(ARCHETYPE_HISTORY).expect("history URL must be valid")
+}
+
+fn is_blank_page(page: &Page) -> bool {
+    page.url == ABOUT_BLANK
+}
+
+fn is_history_page(page: &Page) -> bool {
+    page.url == ARCHETYPE_HISTORY
+}
+
+fn is_settings_page(page: &Page) -> bool {
+    settings_section(page).is_some()
+}
+
+fn settings_section(page: &Page) -> Option<SettingsSection> {
+    match page.url.as_str() {
+        ARCHETYPE_SETTINGS_APPEARANCE => Some(SettingsSection::Appearance),
+        ARCHETYPE_SETTINGS_ABOUT => Some(SettingsSection::About),
+        _ => None,
+    }
+}
+
+fn is_internal_page(page: &Page) -> bool {
+    is_blank_page(page) || page.url.starts_with("archetype://")
+}
+
+fn history_entry_matches(entry: &HistoryEntry, query: &str) -> bool {
+    let query = query.trim().to_lowercase();
+    query.is_empty()
+        || entry.title.to_lowercase().contains(&query)
+        || entry.url.to_lowercase().contains(&query)
+}
+
+fn format_history_time(visited_at: i64) -> String {
+    DateTime::<Utc>::from_timestamp_millis(visited_at).map_or_else(
+        || visited_at.to_string(),
+        |timestamp| {
+            timestamp
+                .with_timezone(&Local)
+                .format("%Y-%m-%d %H:%M")
+                .to_string()
+        },
+    )
+}
+
+fn tab_icon_mode(is_loading: bool, has_favicon: bool) -> TabIconMode {
+    match (is_loading, has_favicon) {
+        (true, _) => TabIconMode::Loading,
+        (false, true) => TabIconMode::Favicon,
+        (false, false) => TabIconMode::Default,
+    }
+}
+
+fn tab_site_icon(
+    mode: TabIconMode,
+    favicon: Option<gpui::ImageSource>,
+    cx: &mut Context<QuickBrowser>,
+) -> Option<AnyElement> {
+    let has_favicon = favicon.is_some();
+    match mode {
+        TabIconMode::Default => Some(
+            div()
+                .flex_none()
+                .size(px(16.0))
+                .child(
+                    Icon::new(IconName::Globe)
+                        .with_size(px(16.0))
+                        .text_color(cx.theme().muted_foreground),
+                )
+                .into_any_element(),
+        ),
+        TabIconMode::Favicon => favicon.map(|favicon| {
+            div()
+                .flex_none()
+                .size(px(16.0))
+                .child(img(favicon).size(px(16.0)))
+                .into_any_element()
+        }),
+        TabIconMode::Loading => Some(
+            div()
+                .relative()
+                .flex_none()
+                .size(px(16.0))
+                .child(
+                    div().absolute().top_0().left_0().size(px(16.0)).child(
+                        Spinner::new()
+                            .with_size(px(16.0))
+                            .color(cx.theme().progress_bar),
+                    ),
+                )
+                .when_some(favicon, |this, favicon| {
+                    this.child(
+                        img(favicon)
+                            .absolute()
+                            .top(px(2.0))
+                            .left(px(2.0))
+                            .size(px(12.0)),
+                    )
+                })
+                .when(!has_favicon, |this| {
+                    this.child(
+                        div()
+                            .absolute()
+                            .top(px(2.0))
+                            .left(px(2.0))
+                            .size(px(12.0))
+                            .child(
+                                Icon::new(IconName::Globe)
+                                    .with_size(px(12.0))
+                                    .text_color(cx.theme().muted_foreground),
+                            ),
+                    )
+                })
+                .into_any_element(),
+        ),
+    }
+}
+
+fn should_hibernate_on_switch(
+    selected_page: Option<&str>,
+    next_page: &str,
+    resident_pages: usize,
+) -> bool {
+    selected_page.is_some_and(|selected| selected != next_page)
+        && resident_pages >= MAX_RESIDENT_RENDERED_PAGES
 }
 
 fn add_bookmark_menu_item(
@@ -2460,6 +3122,11 @@ fn gpui_color(color: PaintColor) -> gpui::Hsla {
 fn image_source(bytes: &[u8]) -> gpui::ImageSource {
     let format = if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
         gpui::ImageFormat::Png
+    } else if std::str::from_utf8(bytes).ok().is_some_and(|source| {
+        let source = source.trim_start();
+        source.starts_with("<svg") || source.starts_with("<?xml") && source.contains("<svg")
+    }) {
+        gpui::ImageFormat::Svg
     } else {
         gpui::ImageFormat::Jpeg
     };
@@ -2549,6 +3216,65 @@ mod tests {
                 .as_str(),
             "http://example.com/docs"
         );
+    }
+
+    #[test]
+    fn blank_page_is_explicit_and_does_not_require_loading() {
+        let mut page = test_page("blank");
+        page.url = blank_url().to_string();
+
+        assert!(is_blank_page(&page));
+        assert_eq!(page.url, ABOUT_BLANK);
+    }
+
+    #[test]
+    fn history_page_is_internal_and_filterable() {
+        let mut page = test_page("history");
+        page.url = history_url().to_string();
+        let entry = HistoryEntry {
+            id: "visit".to_owned(),
+            url: "https://example.com/docs".to_owned(),
+            title: "Rust documentation".to_owned(),
+            visited_at: 0,
+        };
+
+        assert!(is_history_page(&page));
+        assert!(is_internal_page(&page));
+        assert!(history_entry_matches(&entry, "rust"));
+        assert!(history_entry_matches(&entry, "EXAMPLE.COM"));
+        assert!(history_entry_matches(&entry, ""));
+        assert!(!history_entry_matches(&entry, "browser"));
+    }
+
+    #[test]
+    fn settings_routes_map_to_trusted_internal_sections() {
+        let mut page = test_page("settings");
+        page.url = ARCHETYPE_SETTINGS_APPEARANCE.to_owned();
+        assert_eq!(settings_section(&page), Some(SettingsSection::Appearance));
+        assert!(is_settings_page(&page));
+        assert!(is_internal_page(&page));
+
+        page.url = ARCHETYPE_SETTINGS_ABOUT.to_owned();
+        assert_eq!(settings_section(&page), Some(SettingsSection::About));
+
+        page.url = "archetype://settings/unknown".to_owned();
+        assert_eq!(settings_section(&page), None);
+        assert!(is_internal_page(&page));
+    }
+
+    #[test]
+    fn two_tab_switch_keeps_rendered_pages_resident() {
+        assert!(!should_hibernate_on_switch(Some("first"), "second", 2));
+        assert!(!should_hibernate_on_switch(Some("first"), "first", 8));
+        assert!(should_hibernate_on_switch(Some("first"), "ninth", 8));
+    }
+
+    #[test]
+    fn tab_icon_mode_combines_loading_and_favicon_state() {
+        assert_eq!(tab_icon_mode(false, false), TabIconMode::Default);
+        assert_eq!(tab_icon_mode(false, true), TabIconMode::Favicon);
+        assert_eq!(tab_icon_mode(true, false), TabIconMode::Loading);
+        assert_eq!(tab_icon_mode(true, true), TabIconMode::Loading);
     }
 
     #[test]

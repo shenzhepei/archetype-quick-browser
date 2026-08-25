@@ -8,6 +8,12 @@ use url::Url;
 pub const DOCUMENT_LIMIT: usize = 5 * 1024 * 1024;
 pub const FORM_BODY_LIMIT: usize = 1024 * 1024;
 const MAXIMUM_REDIRECTS: usize = 10;
+const USER_AGENT: &str = concat!(
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) ",
+    "AppleWebKit/537.36 (KHTML, like Gecko) Archetype/",
+    env!("CARGO_PKG_VERSION"),
+    " Chrome/140.0.0.0 Safari/537.36"
+);
 
 #[derive(Clone, Debug)]
 pub struct ResponseBytes {
@@ -107,6 +113,7 @@ impl Loader {
             .connect_timeout(connect_timeout)
             .timeout(timeout)
             .redirect(reqwest::redirect::Policy::none())
+            .user_agent(USER_AGENT)
             .build()?;
         Ok(Self { client })
     }
@@ -393,6 +400,39 @@ mod tests {
         assert_eq!(response.final_url.path(), "/final");
         assert_eq!(response.body, b"<p>ready</p>");
         assert_eq!(response.content_type.as_deref(), Some("text/html"));
+    }
+
+    #[test]
+    fn decodes_gzip_http_bodies() {
+        const COMPRESSED: &[u8] = &[
+            0x1f, 0x8b, 0x08, 0x00, 0xaf, 0xe8, 0x8c, 0x6a, 0x00, 0x03, 0xb3, 0x29, 0xb0, 0x4b,
+            0xce, 0xcf, 0x2d, 0x28, 0x4a, 0x2d, 0x2e, 0x4e, 0x4d, 0xb1, 0xd1, 0x2f, 0xb0, 0x03,
+            0x00, 0x2c, 0x02, 0x79, 0x42, 0x11, 0x00, 0x00, 0x00,
+        ];
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = [0_u8; 2048];
+            let length = stream.read(&mut request).unwrap();
+            let request = String::from_utf8_lossy(&request[..length]).to_ascii_lowercase();
+            assert!(request.contains("accept-encoding:"));
+            assert!(request.contains("archetype/0.7.0"));
+            write!(
+                stream,
+                "HTTP/1.1 200 OK\r\nContent-Encoding: gzip\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                COMPRESSED.len()
+            )
+            .unwrap();
+            stream.write_all(COMPRESSED).unwrap();
+        });
+
+        let response = Loader::default()
+            .load(&Url::parse(&format!("http://{address}/compressed")).unwrap())
+            .unwrap();
+
+        server.join().unwrap();
+        assert_eq!(response.body, b"<p>compressed</p>");
     }
 
     #[test]

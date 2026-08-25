@@ -11,7 +11,7 @@ use arch_session::{
         ControlId, ControlKind, FormControl, FormMethod, FormState, FormSubmission, SelectOption,
     },
 };
-use arch_store::{Bookmark, Page, Space, Store};
+use arch_store::{Bookmark, HistoryEntry, Page, Space, Store};
 use archetype_types::{ArchetypeUrl, LoadStage, NavigationId, PageId};
 use thiserror::Error;
 use url::Url;
@@ -448,24 +448,34 @@ impl BrowserCore {
         Ok(())
     }
 
+    /// Restores persisted hibernation metadata without synchronously reloading page content.
+    ///
+    /// # Errors
+    /// Returns an error when stored metadata is invalid or cannot be removed after restoration.
+    pub fn resume_page(&mut self, page: &Page) -> Result<Option<HibernationSnapshot>> {
+        let Some(encoded) = self.store.page_hibernation(&page.id)? else {
+            return Ok(None);
+        };
+        let snapshot: HibernationSnapshot =
+            serde_json::from_str(&encoded).context("could not decode page snapshot")?;
+        let page_id = parsed_page_id(page).context("page has invalid UUID")?;
+        if snapshot.page_id != page_id {
+            anyhow::bail!("page snapshot identity does not match");
+        }
+        self.session
+            .restore_hibernation(snapshot.clone())
+            .context("could not restore page snapshot")?;
+        self.store.delete_page_hibernation(&page.id)?;
+        Ok(Some(snapshot))
+    }
+
     /// Restores hibernation metadata and recreates page content through navigation.
     ///
     /// # Errors
     /// Returns an error when metadata is invalid or re-navigation fails.
     pub fn wake_page(&mut self, page: &Page, viewport_width: f32) -> Result<RenderedPage> {
-        if let Some(encoded) = self.store.page_hibernation(&page.id)? {
-            let snapshot: HibernationSnapshot =
-                serde_json::from_str(&encoded).context("could not decode page snapshot")?;
-            let page_id = parsed_page_id(page).context("page has invalid UUID")?;
-            if snapshot.page_id != page_id {
-                anyhow::bail!("page snapshot identity does not match");
-            }
-            self.session
-                .restore_hibernation(snapshot)
-                .context("could not restore page snapshot")?;
-        }
+        self.resume_page(page)?;
         let rendered = self.reload(page, viewport_width)?;
-        self.store.delete_page_hibernation(&page.id)?;
         Ok(rendered)
     }
 
@@ -619,7 +629,7 @@ impl BrowserCore {
         {
             return Ok(false);
         }
-        self.store.update_page_navigation(
+        self.store.commit_page_navigation(
             &page.id,
             rendered.final_url.as_str(),
             &rendered.title,
@@ -720,6 +730,41 @@ impl BrowserCore {
     /// Returns an error when the database query fails.
     pub fn pages(&self) -> Result<Vec<Page>> {
         Ok(self.store.pages()?)
+    }
+
+    /// Lists the most recent persisted browser visits.
+    ///
+    /// # Errors
+    /// Returns an error when the profile database cannot be queried.
+    pub fn history_entries(&self, limit: usize) -> Result<Vec<HistoryEntry>> {
+        Ok(self.store.history_entries(limit)?)
+    }
+
+    /// Deletes one persisted browser visit.
+    ///
+    /// # Errors
+    /// Returns an error when the profile database cannot be updated.
+    pub fn delete_history_entry(&self, id: &str) -> Result<bool> {
+        Ok(self.store.delete_history_entry(id)?)
+    }
+
+    /// Clears all persisted browser visits.
+    ///
+    /// # Errors
+    /// Returns an error when the profile database cannot be updated.
+    pub fn clear_history(&self) -> Result<usize> {
+        Ok(self.store.clear_history()?)
+    }
+
+    /// Updates one trusted internal page without adding a browser visit.
+    ///
+    /// # Errors
+    /// Returns an error when the URL is not an `archetype:` route or persistence fails.
+    pub fn update_internal_page(&self, page: &Page, url: &Url, title: &str) -> Result<bool> {
+        anyhow::ensure!(url.scheme() == "archetype", "internal page URL is invalid");
+        Ok(self
+            .store
+            .update_page_metadata(&page.id, url.as_str(), title)?)
     }
 
     /// Saves the selected Space and page IDs for restart restoration.
@@ -1762,6 +1807,10 @@ mod tests {
             let pages = core.pages().unwrap();
             assert_eq!(pages[0].title, "Archetype V3 Fixture");
             assert_eq!(pages[0].url, url.as_str());
+            let history = core.history_entries(10).unwrap();
+            assert_eq!(history.len(), 1);
+            assert_eq!(history[0].url, url.as_str());
+            assert_eq!(history[0].title, "Archetype V3 Fixture");
             let reloaded = core.reload(&pages[0], 1280.0).unwrap();
             assert_eq!(reloaded.title, "Archetype V3 Fixture");
         }
@@ -2192,6 +2241,30 @@ mod tests {
         );
         assert!(!core.finish_navigation(&page, &pending, &rendered).unwrap());
         assert!(core.pages().unwrap()[0].title.is_empty());
+        assert!(core.history_entries(10).unwrap().is_empty());
+    }
+
+    #[test]
+    fn internal_page_updates_are_restricted_and_not_recorded() {
+        let mut core = BrowserCore::in_memory().unwrap();
+        let appearance = Url::parse("archetype://settings/appearance").unwrap();
+        let about = Url::parse("archetype://settings/about").unwrap();
+        let page = core.create_page(&appearance).unwrap();
+
+        assert!(
+            core.update_internal_page(&page, &about, "Settings")
+                .unwrap()
+        );
+        assert_eq!(core.pages().unwrap()[0].url, about.as_str());
+        assert!(core.history_entries(10).unwrap().is_empty());
+        assert!(
+            core.update_internal_page(
+                &page,
+                &Url::parse("https://example.com/").unwrap(),
+                "External"
+            )
+            .is_err()
+        );
     }
 
     #[test]

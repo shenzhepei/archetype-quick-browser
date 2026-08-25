@@ -91,6 +91,10 @@ impl Language {
         self.select("所选空间已不存在", "Selected Space no longer exists")
     }
 
+    pub(crate) const fn selected_page_missing(self) -> &'static str {
+        self.select("所选标签页已不存在", "Selected tab no longer exists")
+    }
+
     pub(crate) const fn new_tab(self) -> &'static str {
         self.select("新建标签页", "New tab")
     }
@@ -145,6 +149,42 @@ impl Language {
 
     pub(crate) const fn settings(self) -> &'static str {
         self.select("设置", "Settings")
+    }
+
+    pub(crate) const fn main_menu(self) -> &'static str {
+        self.select("主菜单", "Main menu")
+    }
+
+    pub(crate) const fn history(self) -> &'static str {
+        self.select("历史记录", "History")
+    }
+
+    pub(crate) const fn search_history(self) -> &'static str {
+        self.select("搜索历史记录", "Search history")
+    }
+
+    pub(crate) const fn clear_history(self) -> &'static str {
+        self.select("清空历史记录", "Clear history")
+    }
+
+    pub(crate) const fn delete_history_entry(self) -> &'static str {
+        self.select("删除此记录", "Delete this entry")
+    }
+
+    pub(crate) const fn no_history(self) -> &'static str {
+        self.select("还没有浏览记录", "No browsing history yet")
+    }
+
+    pub(crate) const fn no_history_matches(self) -> &'static str {
+        self.select("没有匹配的历史记录", "No matching history entries")
+    }
+
+    pub(crate) const fn about_archetype(self) -> &'static str {
+        self.select("关于 Archetype", "About Archetype")
+    }
+
+    pub(crate) const fn version(self) -> &'static str {
+        self.select("版本", "Version")
     }
 
     pub(crate) const fn appearance(self) -> &'static str {
@@ -290,5 +330,8 @@ mod tests {
             Language::English.save_to_this_folder(),
             "Save to this folder"
         );
+        assert_eq!(Language::Chinese.history(), "历史记录");
+        assert_eq!(Language::English.search_history(), "Search history");
+        assert_eq!(Language::Chinese.about_archetype(), "关于 Archetype");
     }
 }
