@@ -54,7 +54,8 @@ pnpm test:coverage
 pnpm build
 ```
 
-Create unsigned macOS DMG and ZIP artifacts with `pnpm package:mac`.
+Create unsigned macOS DMG and ZIP artifacts with `pnpm package:mac`. Create Windows NSIS and ZIP
+artifacts with `pnpm package:win` on Windows or a host with the required Wine tooling.
 
 ## Architecture
 
@@ -74,7 +75,7 @@ fallback.
 
 The Chromium architecture and core browser workflows are implemented. Permissions currently default
 to deny. Downloads UI, certificate-error UX, crash recovery, code signing, notarization, auto-update,
-and Windows/Linux packages remain before a production release.
+and Linux packages remain before a production release.
 
 ## License
 

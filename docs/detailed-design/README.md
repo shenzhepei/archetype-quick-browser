@@ -6,4 +6,9 @@
 
 ## Feature 补充需求
 
-当前没有独立 Feature 文档。版本外新增用户可见行为必须按 `feature-NN.md` 同步创建 PRD 和详设。
+| Feature | 详细设计 | 对应 PRD | 状态 | 范围 |
+| --- | --- | --- | --- | --- |
+| `feature-01` | [跨平台窗口标题栏间距](feature-01.md) | [PRD](../prd/feature-01.md) | 已实现 | 平台窗口参数、安全区、主题联动和 Windows 构建 |
+| `feature-02` | [网页上层主菜单](feature-02.md) | [PRD](../prd/feature-02.md) | 已实现 | 原生菜单、固定命令 IPC 与坐标校验 |
+| `feature-03` | [GitHub Release 版本检查](feature-03.md) | [PRD](../prd/feature-03.md) | 已实现 | 主进程 Release 查询、安全 IPC 与关于页状态 |
+| `feature-04` | [稳定标签宽度与标签菜单](feature-04.md) | [PRD](../prd/feature-04.md) | 已实现 | 标签宽度公式、上下文菜单 IPC 与批量关闭 |

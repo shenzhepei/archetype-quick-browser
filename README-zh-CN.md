@@ -54,7 +54,8 @@ pnpm test:coverage
 pnpm build
 ```
 
-使用 `pnpm package:mac` 生成未签名的 macOS DMG 和 ZIP。
+使用 `pnpm package:mac` 生成未签名的 macOS DMG 和 ZIP。在 Windows 或具备 Wine 工具链的
+主机上，使用 `pnpm package:win` 生成 NSIS 安装包和 ZIP。
 
 ## 架构
 
@@ -72,7 +73,7 @@ pnpm build
 ## 状态
 
 Chromium 架构和核心浏览器流程已经实现。网站权限目前默认拒绝。下载 UI、证书错误体验、崩溃
-恢复、代码签名、公证、自动更新及 Windows/Linux 安装包仍是生产发布前的待办项。
+恢复、代码签名、公证、自动更新及 Linux 安装包仍是生产发布前的待办项。
 
 ## 许可证
 
