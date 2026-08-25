@@ -36,7 +36,7 @@ cookie_store = "=0.22.0"
 fontdb = "0.16.2"
 futures-executor = "0.3"
 getrandom = "0.3"
-html5ever = "0.35"
+html5ever = "0.39"
 gpui = { version = "0.2.2", features = ["runtime_shaders"] }
 gpui-component = "0.5.1"
 gpui-component-assets = "0.5.1"
