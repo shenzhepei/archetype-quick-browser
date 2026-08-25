@@ -42,7 +42,7 @@ gpui-component = "0.5.1"
 gpui-component-assets = "0.5.1"
 directories = "6.0"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
-markup5ever_rcdom = "0.35"
+markup5ever_rcdom = "0.39"
 psl = "2.1"
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls"] }
 rustls = { version = "0.23", default-features = false, features = ["std"] }
