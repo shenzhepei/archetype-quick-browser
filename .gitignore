@@ -1,7 +1,7 @@
-/target/
-/fuzz/target/
-/coverage/
-*.db
-*.db-shm
-*.db-wal
+node_modules/
+out/
+dist/
+release/
+coverage/
 .DS_Store
+*.log
