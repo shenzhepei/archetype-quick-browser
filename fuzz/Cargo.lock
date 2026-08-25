@@ -10,7 +10,7 @@ checksum = "c3d036a3c4ab069c7b410a2ce876bd74808d2d0888a82667669f8e783a898bf1"
 
 [[package]]
 name = "arch-css"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "cssparser",
  "serde",
@@ -18,14 +18,14 @@ dependencies = [
 
 [[package]]
 name = "arch-dom"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "serde",
 ]
 
 [[package]]
 name = "arch-html"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "arch-dom",
  "html5ever",
@@ -34,7 +34,7 @@ dependencies = [
 
 [[package]]
 name = "arch-layout"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "arch-dom",
  "arch-style",
@@ -43,7 +43,7 @@ dependencies = [
 
 [[package]]
 name = "arch-paint"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "arch-layout",
  "arch-style",
@@ -52,7 +52,7 @@ dependencies = [
 
 [[package]]
 name = "arch-style"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "arch-css",
  "arch-dom",
@@ -71,7 +71,7 @@ dependencies = [
 
 [[package]]
 name = "archetype-protocol"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "arch-paint",
  "archetype-types",
@@ -83,7 +83,7 @@ dependencies = [
 
 [[package]]
 name = "archetype-types"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "serde",
  "url",
@@ -92,9 +92,9 @@ dependencies = [
 
 [[package]]
 name = "base64"
-version = "0.22.1"
+version = "0.23.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
+checksum = "ac07cdecf99051d9a5238b80f35af32cdeba5b336e55d957b318b50137e18da5"
 
 [[package]]
 name = "bitflags"
