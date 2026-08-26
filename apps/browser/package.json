@@ -1,0 +1,60 @@
+{
+  "name": "@archetype/browser",
+  "version": "1.0.0",
+  "description": "Electron browser shell for the Archetype application runtime.",
+  "author": "shenzhepei",
+  "license": "Apache-2.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.33.2",
+  "main": "out/main/index.js",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "typecheck": "tsc -b --pretty false",
+    "package:mac": "pnpm build && CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac dmg zip",
+    "package:mac:arm64": "pnpm build && CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac dmg zip --arm64",
+    "package:mac:x64": "pnpm build && CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac dmg zip --x64",
+    "package:win": "pnpm build && electron-builder --win nsis",
+    "package:win:x64": "pnpm build && electron-builder --win nsis --x64"
+  },
+  "dependencies": {
+    "@archetype/browser-runtime": "workspace:*",
+    "@archetype/protocol": "workspace:*",
+    "i18next": "catalog:",
+    "lucide-react": "catalog:",
+    "react": "catalog:",
+    "react-dom": "catalog:",
+    "react-i18next": "catalog:"
+  },
+  "devDependencies": {
+    "@types/react": "19.2.18",
+    "@types/react-dom": "19.2.5",
+    "@vitejs/plugin-react": "5.2.0",
+    "electron": "44.0.0",
+    "electron-builder": "26.15.3",
+    "electron-vite": "5.0.0"
+  },
+  "build": {
+    "appId": "io.github.shenzhepei.archetype.runtime",
+    "productName": "Archetype Runtime",
+    "asar": true,
+    "files": ["out/**/*", "package.json"],
+    "directories": { "output": "../../dist" },
+    "mac": {
+      "category": "public.app-category.developer-tools",
+      "icon": "../../build/icon.icns",
+      "artifactName": "Archetype-Runtime-${version}-macos-${arch}.${ext}",
+      "target": [{ "target": "dmg", "arch": ["x64", "arm64"] }, { "target": "zip", "arch": ["x64", "arm64"] }]
+    },
+    "win": {
+      "icon": "../../build/icon.png",
+      "artifactName": "Archetype-Runtime-${version}-windows-${arch}-setup.${ext}",
+      "target": [{ "target": "nsis", "arch": ["x64"] }]
+    },
+    "linux": {
+      "icon": "../../build/icon.png",
+      "target": ["AppImage"]
+    }
+  }
+}
