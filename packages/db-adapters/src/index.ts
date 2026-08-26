@@ -4,6 +4,8 @@ import { createPool as createMysqlPool } from 'mysql2'
 import pg from 'pg'
 import type { DatabaseDialect, RuntimeDatabase, RuntimeTransaction } from '@archetype/function-sdk'
 
+export { initializePlatformSchema } from './platform-schema.js'
+
 type DatabaseShape = any
 
 export interface DatabaseConnection {

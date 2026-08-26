@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import pg from 'pg'
 import { afterAll, beforeAll, describe, expect, test } from 'vitest'
-import { createRuntimeDatabase } from '@archetype/db-adapters'
+import { createRuntimeDatabase, initializePlatformSchema } from '@archetype/db-adapters'
 import { DurableWorker } from './worker.js'
 
 const enabled = process.env.RUN_INTEGRATION_TESTS === '1'
@@ -26,6 +26,7 @@ describe.skipIf(!enabled)('durable worker delivery lifecycle', () => {
 
   beforeAll(async () => {
     await admin.query(`CREATE DATABASE ${databaseName}`)
+    await initializePlatformSchema(platform)
     const parsed = new URL(applicationAdminUrl)
     parsed.pathname = `/${databaseName}`
     databaseUrl = parsed.toString()

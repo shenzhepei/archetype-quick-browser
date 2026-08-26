@@ -226,6 +226,9 @@ importers:
 
   services/gateway:
     dependencies:
+      '@archetype/db-adapters':
+        specifier: workspace:*
+        version: link:../../packages/db-adapters
       '@archetype/protocol':
         specifier: workspace:*
         version: link:../../packages/protocol

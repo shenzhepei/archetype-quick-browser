@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import { pathToFileURL } from 'node:url'
 import pg from 'pg'
-import { createRuntimeDatabase } from '@archetype/db-adapters'
+import { createRuntimeDatabase, initializePlatformSchema } from '@archetype/db-adapters'
 import type { RuntimeDeployment, RuntimeWorker } from '@archetype/function-sdk'
 
 interface QueueJob {
@@ -21,6 +21,7 @@ export function retryDelayMs(attempt: number): number {
 
 export class DurableWorker {
   private readonly platform: pg.Pool
+  private readonly platformReady: Promise<void>
   private readonly appPromise
   private stopped = false
 
@@ -30,7 +31,12 @@ export class DurableWorker {
     private readonly connection: { dialect: 'postgres' | 'mysql'; url: string }
   ) {
     this.platform = new pg.Pool({ connectionString: platformUrl, max: 6 })
+    this.platformReady = initializePlatformSchema(this.platform)
     this.appPromise = createRuntimeDatabase(connection)
+  }
+
+  async initialize(): Promise<void> {
+    await this.platformReady
   }
 
   async run(): Promise<void> {
@@ -51,11 +57,13 @@ export class DurableWorker {
 
   async close(): Promise<void> {
     this.stop()
+    await this.platformReady
     await (await this.appPromise).destroy()
     await this.platform.end()
   }
 
   async transferOutbox(): Promise<number> {
+    await this.platformReady
     const app = await this.appPromise
     return app.db.transaction().execute(async (transaction) => {
       const events = await transaction.selectFrom('_archetype_outbox')
@@ -80,6 +88,7 @@ export class DurableWorker {
   }
 
   async consumeOne(): Promise<boolean> {
+    await this.platformReady
     const client = await this.platform.connect()
     let job: QueueJob | undefined
     try {
