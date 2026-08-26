@@ -8,37 +8,39 @@ export function TabStrip({ state, bridge }: { state: BrowserState; bridge: Arche
     <div className="tab-strip" role="tablist">
       <div className="window-drag-space" />
       <div className="tabs-scroll" style={{ flexBasis: `${state.tabs.length * 221 + 38}px` }}>
-        {state.tabs.map((tab) => (
-          <button
-            className={`tab ${tab.id === state.activeTabId ? 'is-active' : ''}`}
-            key={tab.id}
-            role="tab"
-            aria-selected={tab.id === state.activeTabId}
-            onClick={() => void bridge.selectTab(tab.id)}
-            onContextMenu={(event) => {
-              event.preventDefault()
-              void bridge.showTabMenu({ tabId: tab.id, x: event.clientX, y: event.clientY })
-            }}
-          >
-            <TabIcon tab={tab} />
-            <span className="tab-title">{tab.title || t('newTab')}</span>
-            <span
-              className="tab-close"
-              role="button"
-              tabIndex={0}
-              aria-label={t('closeTab')}
-              onClick={(event) => {
-                event.stopPropagation()
-                void bridge.closeTab(tab.id)
-              }}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter' || event.key === ' ') void bridge.closeTab(tab.id)
+        <div className="tabs-list">
+          {state.tabs.map((tab) => (
+            <button
+              className={`tab ${tab.id === state.activeTabId ? 'is-active' : ''}`}
+              key={tab.id}
+              role="tab"
+              aria-selected={tab.id === state.activeTabId}
+              onClick={() => void bridge.selectTab(tab.id)}
+              onContextMenu={(event) => {
+                event.preventDefault()
+                void bridge.showTabMenu({ tabId: tab.id, x: event.clientX, y: event.clientY })
               }}
             >
-              <X size={13} />
-            </span>
-          </button>
-        ))}
+              <TabIcon tab={tab} />
+              <span className="tab-title">{tab.title || t('newTab')}</span>
+              <span
+                className="tab-close"
+                role="button"
+                tabIndex={0}
+                aria-label={t('closeTab')}
+                onClick={(event) => {
+                  event.stopPropagation()
+                  void bridge.closeTab(tab.id)
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' || event.key === ' ') void bridge.closeTab(tab.id)
+                }}
+              >
+                <X size={13} />
+              </span>
+            </button>
+          ))}
+        </div>
         <button className="icon-button new-tab" aria-label={t('newTab')} title={t('newTab')} onClick={() => void bridge.newTab()}>
           <Plus size={17} />
         </button>

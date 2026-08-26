@@ -1,8 +1,11 @@
 import { randomUUID } from 'node:crypto'
-import { BaseWindow, WebContents, WebContentsView } from 'electron'
-import { internalPageTitle } from '../shared/browser'
+import { join } from 'node:path'
+import { app, BaseWindow, dialog, Menu, WebContents, WebContentsView } from 'electron'
+import type { ContextMenuParams } from 'electron'
+import { internalPageTitle, isRecordableHistoryEntry } from '../shared/browser'
 import type {
   Bookmark,
+  BookmarkFolder,
   BrowserSettings,
   BrowserState,
   ContentBounds,
@@ -10,6 +13,7 @@ import type {
   TabState
 } from '../shared/browser'
 import { BrowserStore } from './store'
+import { buildPageContextMenu, pageMenuLabels, pageSaveFilename } from './page-context-menu'
 import { SiteSecurityService } from './site-security'
 
 interface BrowserTab {
@@ -22,7 +26,7 @@ const INTERNAL_PREFIX = 'archetype://'
 export function normalizeAddress(input: string): string {
   const value = input.trim()
   if (!value) return 'about:blank'
-  if (/^(https?|file|about|archetype):/i.test(value)) return value
+  if (/^(https?|file|about|archetype|view-source):/i.test(value)) return value
   if (/^(localhost|\d{1,3}(\.\d{1,3}){3})(:\d+)?(\/|$)/i.test(value)) return `http://${value}`
   if (/^[\w-]+(\.[\w-]+)+(\/.*)?$/i.test(value)) return `https://${value}`
   return `https://www.google.com/search?q=${encodeURIComponent(value)}`
@@ -33,6 +37,7 @@ export class BrowserController {
   private activeTabId = ''
   private bounds: ContentBounds = { x: 0, y: 132, width: 1000, height: 600 }
   private bookmarks: Bookmark[] = []
+  private bookmarkFolders: BookmarkFolder[] = []
   private history: HistoryEntry[] = []
   private settings: BrowserSettings = { theme: 'system', language: 'en' }
 
@@ -40,17 +45,22 @@ export class BrowserController {
     private readonly window: BaseWindow,
     private readonly shellContents: WebContents,
     private readonly store: BrowserStore,
-    private readonly siteSecurity: SiteSecurityService
+    private readonly siteSecurity: SiteSecurityService,
+    private readonly persistTabs = true
   ) {}
 
   async initialize(): Promise<void> {
-    await this.store.load()
     const saved = this.store.snapshot()
     this.bookmarks = saved.bookmarks
-    this.history = saved.history
+    this.bookmarkFolders = saved.bookmarkFolders
+    this.history = saved.history.filter((entry) => isRecordableHistoryEntry(entry.title, entry.url))
     this.settings = saved.settings
-    for (const tab of saved.tabs) this.createTab(tab.url, tab.title, false)
-    const selected = [...this.tabs.keys()][Math.min(saved.activeTab, this.tabs.size - 1)]
+    if (this.persistTabs) {
+      for (const tab of saved.tabs) this.createTab(tab.url, tab.title, false)
+    } else {
+      this.createTab('about:blank', 'New tab', false)
+    }
+    const selected = [...this.tabs.keys()][this.persistTabs ? Math.min(saved.activeTab, this.tabs.size - 1) : 0]
     this.selectTab(selected, false)
   }
 
@@ -59,6 +69,7 @@ export class BrowserController {
       tabs: [...this.tabs.values()].map(({ state }) => ({ ...state })),
       activeTabId: this.activeTabId,
       bookmarks: structuredClone(this.bookmarks),
+      bookmarkFolders: structuredClone(this.bookmarkFolders),
       history: structuredClone(this.history),
       settings: { ...this.settings },
       siteInfo: this.siteSecurity.infoFor(this.tabs.get(this.activeTabId)?.state.url ?? '')
@@ -152,7 +163,11 @@ export class BrowserController {
     this.publish()
   }
 
-  openUtilityPage(path: 'history' | 'settings/appearance'): void {
+  openUtilityPage(path: 'history' | 'bookmarks' | 'extensions' | 'settings/appearance'): void {
+    if (path === 'bookmarks') {
+      this.openBookmarkManager()
+      return
+    }
     const url = `${INTERNAL_PREFIX}${path}`
     const existing = [...this.tabs.entries()].find(([, tab]) =>
       path.startsWith('settings/')
@@ -161,6 +176,17 @@ export class BrowserController {
     )
     if (existing) {
       this.selectTab(existing[0])
+      return
+    }
+    this.createTab(url, internalPageTitle(url, this.settings.language))
+  }
+
+  openBookmarkManager(createFolder = false): void {
+    const url = `${INTERNAL_PREFIX}bookmarks${createFolder ? '/new-folder' : ''}`
+    const existing = [...this.tabs.entries()].find(([, tab]) => tab.state.url.startsWith(`${INTERNAL_PREFIX}bookmarks`))
+    if (existing) {
+      this.selectTab(existing[0])
+      if (createFolder) this.navigate(url)
       return
     }
     this.createTab(url, internalPageTitle(url, this.settings.language))
@@ -184,6 +210,14 @@ export class BrowserController {
     this.activeTab().view.webContents.stop()
   }
 
+  canPrint(): boolean {
+    return this.canPrintTab(this.activeTab())
+  }
+
+  print(): void {
+    this.printTab(this.activeTab())
+  }
+
   setBounds(bounds: ContentBounds): void {
     this.bounds = {
       x: Math.max(0, Math.round(bounds.x)),
@@ -196,12 +230,34 @@ export class BrowserController {
   }
 
   toggleBookmark(): void {
-    const tab = this.activeTab().state
-    const index = this.bookmarks.findIndex((bookmark) => bookmark.url === tab.url)
-    if (index >= 0) this.bookmarks.splice(index, 1)
-    else if (!tab.url.startsWith(INTERNAL_PREFIX) && tab.url !== 'about:blank') {
-      this.bookmarks.push({ id: randomUUID(), title: tab.title, url: tab.url, createdAt: Date.now() })
+    const tab = this.activeTab()
+    const index = this.bookmarks.findIndex((bookmark) => bookmark.url === tab.state.url)
+    if (index < 0) {
+      this.addActivePageBookmark()
+      return
     }
+    this.bookmarks.splice(index, 1)
+    this.publish()
+    void this.persist()
+  }
+
+  canAddActivePageBookmark(): boolean {
+    const tab = this.activeTab()
+    return /^(https?|file):/i.test(tab.state.url) && !this.bookmarks.some((bookmark) => bookmark.url === tab.state.url)
+  }
+
+  addActivePageBookmark(): void {
+    if (!this.canAddActivePageBookmark()) return
+    const tab = this.activeTab()
+    const bookmark = {
+      id: randomUUID(),
+      title: tab.state.title,
+      url: tab.state.url,
+      favicon: tab.state.favicon,
+      createdAt: Date.now()
+    }
+    this.bookmarks.push(bookmark)
+    if (bookmark.favicon) void this.cacheBookmarkFavicon(bookmark.id, bookmark.favicon, tab.view.webContents)
     this.publish()
     void this.persist()
   }
@@ -221,6 +277,49 @@ export class BrowserController {
 
   clearHistory(): void {
     this.history = []
+    this.publish()
+    void this.persist()
+  }
+
+  removeBookmark(id: string): void {
+    const index = this.bookmarks.findIndex((bookmark) => bookmark.id === id)
+    if (index < 0) return
+    this.bookmarks.splice(index, 1)
+    this.publish()
+    void this.persist()
+  }
+
+  createBookmarkFolder(name: string, parentId?: string): void {
+    const normalizedName = name.trim().slice(0, 80)
+    if (!normalizedName || (parentId && !this.bookmarkFolders.some((folder) => folder.id === parentId))) return
+    this.bookmarkFolders.push({ id: randomUUID(), name: normalizedName, parentId, createdAt: Date.now() })
+    this.publish()
+    void this.persist()
+  }
+
+  removeBookmarkFolder(id: string): void {
+    if (!this.bookmarkFolders.some((folder) => folder.id === id)) return
+    const removed = new Set([id])
+    let changed = true
+    while (changed) {
+      changed = false
+      for (const folder of this.bookmarkFolders) {
+        if (folder.parentId && removed.has(folder.parentId) && !removed.has(folder.id)) {
+          removed.add(folder.id)
+          changed = true
+        }
+      }
+    }
+    this.bookmarkFolders = this.bookmarkFolders.filter((folder) => !removed.has(folder.id))
+    this.bookmarks = this.bookmarks.filter((bookmark) => !bookmark.parentId || !removed.has(bookmark.parentId))
+    this.publish()
+    void this.persist()
+  }
+
+  moveBookmark(id: string, parentId?: string): void {
+    const bookmark = this.bookmarks.find((entry) => entry.id === id)
+    if (!bookmark || (parentId && !this.bookmarkFolders.some((folder) => folder.id === parentId))) return
+    bookmark.parentId = parentId
     this.publish()
     void this.persist()
   }
@@ -265,6 +364,7 @@ export class BrowserController {
       this.createTab(url)
       return { action: 'deny' }
     })
+    contents.on('context-menu', (_event, params) => this.showPageContextMenu(tab, params))
     contents.on('did-start-loading', () => this.updateTab(tab, { loading: true }))
     contents.on('did-stop-loading', () => this.updateNavigationState(tab, false))
     contents.on('did-navigate', (_event, url) => {
@@ -277,11 +377,95 @@ export class BrowserController {
     contents.on('page-title-updated', (event, title) => {
       event.preventDefault()
       this.updateTab(tab, { title: title || tab.state.url })
+      this.recordHistory(tab)
     })
     contents.on('page-favicon-updated', (_event, favicons) => {
-      this.updateTab(tab, { favicon: favicons[0] })
+      const favicon = favicons[0]
+      this.updateTab(tab, { favicon })
+      if (favicon) this.updateBookmarkFavicon(tab, favicon)
     })
     contents.on('render-process-gone', () => this.updateTab(tab, { loading: false }))
+  }
+
+  private showPageContextMenu(tab: BrowserTab, params: ContextMenuParams): void {
+    const contents = tab.view.webContents
+    const url = contents.getURL() || tab.state.url
+    const navigation = contents.navigationHistory
+    const isPageUrl = /^(https?|file):/i.test(url)
+    const canPrint = this.canPrintTab(tab)
+    const canViewSource = /^https?:/i.test(url)
+    const isAlive = (): boolean => !contents.isDestroyed()
+    const template = buildPageContextMenu(this.settings.language, {
+      canGoBack: navigation.canGoBack(),
+      canGoForward: navigation.canGoForward(),
+      canSave: isPageUrl,
+      canPrint,
+      canViewSource
+    }, {
+      back: () => {
+        if (isAlive() && navigation.canGoBack()) navigation.goBack()
+      },
+      forward: () => {
+        if (isAlive() && navigation.canGoForward()) navigation.goForward()
+      },
+      reload: () => {
+        if (isAlive()) contents.reload()
+      },
+      savePage: () => {
+        if (isAlive() && isPageUrl) void this.savePage(tab)
+      },
+      printPage: () => {
+        if (isAlive() && canPrint) this.printTab(tab)
+      },
+      viewSource: () => {
+        if (isAlive() && canViewSource) this.createTab(`view-source:${url}`, `Source: ${tab.state.title}`)
+      },
+      inspect: () => {
+        if (isAlive()) contents.inspectElement(params.x, params.y)
+      }
+    })
+    Menu.buildFromTemplate(template).popup({ window: this.window })
+  }
+
+  private canPrintTab(tab: BrowserTab): boolean {
+    return /^(https?|file|view-source):/i.test(tab.view.webContents.getURL() || tab.state.url)
+  }
+
+  private printTab(tab: BrowserTab): void {
+    const contents = tab.view.webContents
+    if (contents.isDestroyed() || !this.canPrintTab(tab)) return
+    const labels = pageMenuLabels[this.settings.language]
+    contents.print({ printBackground: true }, (success, failureReason) => {
+      if (success || contents.isDestroyed() || /cancel/i.test(failureReason)) return
+      void dialog.showMessageBox(this.window, {
+        type: 'error',
+        title: labels.printFailed,
+        message: labels.printFailed,
+        detail: /printer/i.test(failureReason) ? labels.noPrinters : labels.printFailedDetail
+      })
+    })
+  }
+
+  private async savePage(tab: BrowserTab): Promise<void> {
+    const contents = tab.view.webContents
+    if (contents.isDestroyed()) return
+    const labels = pageMenuLabels[this.settings.language]
+    const result = await dialog.showSaveDialog(this.window, {
+      title: labels.savePageAs,
+      defaultPath: join(app.getPath('downloads'), pageSaveFilename(tab.state.title, contents.getURL() || tab.state.url)),
+      filters: [{ name: labels.htmlFile, extensions: ['html'] }]
+    })
+    if (result.canceled || !result.filePath || contents.isDestroyed()) return
+    try {
+      await contents.savePage(result.filePath, 'HTMLComplete')
+    } catch (error) {
+      await dialog.showMessageBox(this.window, {
+        type: 'error',
+        title: labels.saveFailed,
+        message: labels.saveFailed,
+        detail: error instanceof Error ? error.message : labels.saveFailedDetail
+      })
+    }
   }
 
   private updateNavigationState(tab: BrowserTab, loading: boolean, url?: string): void {
@@ -295,6 +479,34 @@ export class BrowserController {
     void this.persist()
   }
 
+  private async cacheBookmarkFavicon(bookmarkId: string, url: string, contents: WebContents): Promise<void> {
+    try {
+      const response = await contents.session.fetch(url)
+      if (!response.ok) return
+      const mimeType = response.headers.get('content-type')?.split(';')[0]?.trim()
+      const declaredSize = Number(response.headers.get('content-length') ?? 0)
+      if (!mimeType?.startsWith('image/') || declaredSize > 1024 * 1024) return
+      const bytes = Buffer.from(await response.arrayBuffer())
+      if (bytes.byteLength === 0 || bytes.byteLength > 1024 * 1024) return
+      const bookmark = this.bookmarks.find((entry) => entry.id === bookmarkId)
+      if (!bookmark) return
+      bookmark.favicon = `data:${mimeType};base64,${bytes.toString('base64')}`
+      this.publish()
+      await this.persist()
+    } catch {
+      // The original favicon URL remains usable when caching is unavailable.
+    }
+  }
+
+  private updateBookmarkFavicon(tab: BrowserTab, favicon: string): void {
+    const bookmark = this.bookmarks.find((entry) => entry.url === tab.state.url)
+    if (!bookmark || bookmark.favicon === favicon || bookmark.favicon?.startsWith('data:image/')) return
+    bookmark.favicon = favicon
+    this.publish()
+    void this.persist()
+    void this.cacheBookmarkFavicon(bookmark.id, favicon, tab.view.webContents)
+  }
+
   private updateTab(tab: BrowserTab, update: Partial<TabState>): void {
     Object.assign(tab.state, update)
     this.publish()
@@ -302,7 +514,15 @@ export class BrowserController {
 
   private recordHistory(tab: BrowserTab): void {
     const { url, title } = tab.state
-    if (!/^https?:/i.test(url)) return
+    if (!isRecordableHistoryEntry(title, url)) return
+    const latest = this.history[0]
+    if (latest?.url === url && Date.now() - latest.visitedAt <= 5000) {
+      latest.title = title
+      latest.visitedAt = Date.now()
+      this.publish()
+      void this.persist()
+      return
+    }
     this.history.unshift({ id: randomUUID(), url, title, visitedAt: Date.now() })
     this.history = this.history.slice(0, 1000)
     this.publish()
@@ -317,9 +537,12 @@ export class BrowserController {
     const tabs = [...this.tabs.values()].map(({ state }) => ({ url: state.url, title: state.title }))
     const activeTab = Math.max(0, [...this.tabs.keys()].indexOf(this.activeTabId))
     await this.store.update((state) => {
-      state.tabs = tabs
-      state.activeTab = activeTab
+      if (this.persistTabs) {
+        state.tabs = tabs
+        state.activeTab = activeTab
+      }
       state.bookmarks = this.bookmarks
+      state.bookmarkFolders = this.bookmarkFolders
       state.history = this.history
       state.settings = this.settings
     })

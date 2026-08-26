@@ -7,6 +7,7 @@ const state: BrowserState = {
   tabs: [{ id: 'one', url: 'about:blank', title: 'New tab', loading: false, canGoBack: false, canGoForward: false }],
   activeTabId: 'one',
   bookmarks: [],
+  bookmarkFolders: [],
   history: [],
   settings: { theme: 'system', language: 'en' },
   siteInfo: { url: '', connection: 'none', permissions: [] }
@@ -19,7 +20,9 @@ it('selects, closes, and creates tabs', () => {
     newTab: vi.fn(),
     showTabMenu: vi.fn()
   } as unknown as ArchetypeBridge
-  render(<TabStrip state={state} bridge={bridge} />)
+  const { container } = render(<TabStrip state={state} bridge={bridge} />)
+  expect(container.querySelector('.tabs-list')).toContainElement(screen.getByRole('tab'))
+  expect(container.querySelector('.tabs-scroll')).toContainElement(screen.getByLabelText('New tab'))
   fireEvent.click(screen.getByRole('tab'))
   fireEvent.click(screen.getByLabelText('Close tab'))
   fireEvent.click(screen.getByLabelText('New tab'))

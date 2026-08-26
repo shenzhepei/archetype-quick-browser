@@ -6,6 +6,7 @@ const initialState: BrowserState = {
   tabs: [],
   activeTabId: '',
   bookmarks: [],
+  bookmarkFolders: [],
   history: [],
   settings: { theme: 'system', language: 'en' },
   siteInfo: { url: '', connection: 'none', permissions: [] }

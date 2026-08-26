@@ -72,8 +72,8 @@ button { color: inherit; }
 
 .window-drag-space { flex: 0 0 12px; height: 100%; }
 .titlebar-drag-tail { flex: 1; height: 100%; min-width: 42px; }
-.tabs-scroll { display: flex; flex: 0 1 auto; align-items: end; gap: 1px; min-width: 0; max-width: calc(100vw - 118px); overflow-x: auto; scrollbar-width: none; -webkit-app-region: no-drag; }
-.tabs-scroll::-webkit-scrollbar { display: none; }
+.tabs-scroll { display: flex; flex: 0 1 auto; align-items: end; min-width: 0; max-width: calc(100vw - 118px); overflow: hidden; -webkit-app-region: no-drag; }
+.tabs-list { display: flex; flex: 1 1 auto; align-items: end; gap: 1px; min-width: 0; overflow: hidden; }
 
 :root[data-platform='darwin'] .window-drag-space { flex-basis: 88px; }
 :root[data-platform='darwin'] .tabs-scroll { max-width: calc(100vw - 130px); }
@@ -84,9 +84,10 @@ button { color: inherit; }
   display: grid;
   grid-template-columns: 20px minmax(32px, 1fr) 24px;
   align-items: center;
+  container: browser-tab / inline-size;
   flex: 1 1 220px;
-  width: 220px;
-  min-width: 116px;
+  width: auto;
+  min-width: 30px;
   max-width: 220px;
   height: 34px;
   padding: 0 6px 0 10px;
@@ -102,6 +103,14 @@ button { color: inherit; }
 .tab-close { display: grid; place-items: center; width: 22px; height: 22px; border-radius: 4px; opacity: 0; }
 .tab:hover .tab-close, .tab.is-active .tab-close { opacity: 1; }
 .tab-close:hover { background: var(--hover); }
+@container browser-tab (max-width: 72px) {
+  .tab-title { display: none; }
+  .tab-close { display: none; grid-column: 1 / -1; margin: 0 auto; opacity: 1; }
+  .tab > .favicon, .tab > .loading-favicon { grid-column: 1 / -1; margin: 0 auto; }
+  .tab:hover > .favicon, .tab:hover > .loading-favicon,
+  .tab.is-active > .favicon, .tab.is-active > .loading-favicon { display: none; }
+  .tab:hover .tab-close, .tab.is-active .tab-close { display: grid; }
+}
 .favicon { display: grid; place-items: center; width: 16px; height: 16px; color: var(--muted); }
 .favicon img { width: 16px; height: 16px; object-fit: contain; }
 .favicon.is-loading { position: absolute; inset: 4px; width: 10px; height: 10px; }
@@ -148,13 +157,18 @@ button { color: inherit; }
 .avatar-button { border-radius: 50%; background: #dce7f8; color: #1f5da8; }
 :root[data-theme='dark'] .avatar-button { background: #334966; color: #b4d2ff; }
 .segmented { display: inline-grid; grid-auto-flow: column; grid-auto-columns: 1fr; min-width: 260px; padding: 2px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface-muted); }
-.segmented button { min-height: 30px; padding: 0 14px; border: 0; border-radius: 4px; background: transparent; white-space: nowrap; }
+.segmented button { min-height: 30px; padding: 0 14px; border: 0; border-radius: 4px; background: transparent; cursor: pointer; white-space: nowrap; }
 .segmented button.is-selected { color: var(--text); background: var(--surface); box-shadow: 0 1px 3px rgba(0, 0, 0, 0.14); }
 
-.bookmarks-bar { display: flex; align-items: center; gap: 3px; min-height: 0; max-height: 34px; padding: 3px 10px; overflow-x: auto; background: var(--toolbar-bg); border-bottom: 1px solid var(--border); }
+.bookmarks-bar { position: relative; display: flex; align-items: center; gap: 3px; min-width: 0; min-height: 0; max-height: 34px; padding: 3px 10px; overflow: hidden; background: var(--toolbar-bg); border-bottom: 1px solid var(--border); }
 .bookmarks-bar button { display: inline-flex; align-items: center; gap: 6px; flex: 0 0 auto; max-width: 180px; height: 27px; padding: 0 8px; border: 0; border-radius: 5px; background: transparent; font-size: 12px; }
 .bookmarks-bar button:hover { background: var(--hover); }
 .bookmarks-bar span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bookmarks-bar .bookmark-item.is-overflow { position: absolute; visibility: hidden; pointer-events: none; }
+.bookmarks-bar .bookmarks-more { width: 30px; padding: 0; justify-content: center; margin-left: auto; }
+.bookmarks-bar .bookmarks-more.is-hidden { position: absolute; visibility: hidden; pointer-events: none; }
+.bookmark-favicon { display: grid; place-items: center; flex: 0 0 auto; color: var(--muted); }
+.bookmark-favicon img { display: block; max-width: 100%; max-height: 100%; object-fit: contain; }
 
 .browser-content { position: relative; min-width: 0; min-height: 0; overflow: auto; background: var(--surface); }
 .preview-content { display: grid; place-items: center; align-content: center; gap: 22px; min-height: 100%; background: var(--surface); }
@@ -177,11 +191,48 @@ button { color: inherit; }
 .history-list span { display: grid; min-width: 0; gap: 3px; }
 .history-list strong, .history-list small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .history-list small { color: var(--muted); }
+.bookmark-manager { display: grid; grid-template-columns: 210px minmax(0, 1fr); min-height: 420px; }
+.bookmark-tree { min-width: 0; padding: 16px 12px 16px 0; border-right: 1px solid var(--border); }
+.bookmark-tree button { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 36px; padding: 0 10px; overflow: hidden; border: 0; border-radius: 5px; background: transparent; cursor: pointer; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
+.bookmark-tree button:hover { background: var(--hover); }
+.bookmark-tree button.is-active { color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.bookmark-tree svg { flex: 0 0 auto; }
+.bookmark-directory { min-width: 0; padding: 16px 0 0 18px; }
+.bookmark-directory-heading { display: flex; align-items: center; justify-content: space-between; min-height: 36px; padding: 0 8px 10px; border-bottom: 1px solid var(--border); }
+.bookmark-directory-heading > div { display: flex; align-items: center; gap: 9px; min-width: 0; }
+.bookmark-directory-heading h2 { margin: 0; overflow: hidden; font-size: 17px; line-height: 24px; text-overflow: ellipsis; white-space: nowrap; }
+.new-folder-form { display: grid; grid-template-columns: minmax(0, 1fr) auto 32px; align-items: center; gap: 8px; padding: 12px 8px; border-bottom: 1px solid var(--border); }
+.new-folder-form input { min-width: 0; height: 34px; padding: 0 10px; border: 1px solid var(--border); border-radius: 5px; color: var(--text); background: var(--surface); outline: none; }
+.new-folder-form input:focus { border-color: var(--accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 18%, transparent); }
+.bookmark-list { display: grid; }
+.bookmark-list article { display: grid; grid-template-columns: 24px minmax(180px, 1fr) minmax(150px, 210px) 32px; align-items: center; gap: 8px; min-height: 66px; padding-left: 10px; border-bottom: 1px solid var(--border); }
+.bookmark-list article.bookmark-folder-row { grid-template-columns: 24px minmax(0, 1fr) 32px; }
+.bookmark-open { display: grid; grid-template-columns: 190px minmax(0, 1fr); gap: 18px; align-items: center; min-width: 0; min-height: 61px; padding: 10px 12px; border: 0; background: transparent; cursor: pointer; text-align: left; }
+.bookmark-open:hover { background: var(--hover); }
+.bookmark-open time { color: var(--muted); font-size: 12px; }
+.bookmark-open span { display: grid; min-width: 0; gap: 3px; }
+.bookmark-open strong, .bookmark-open small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bookmark-open small { color: var(--muted); }
+.folder-open { display: grid; min-width: 0; gap: 3px; min-height: 58px; padding: 8px 12px; border: 0; background: transparent; cursor: pointer; text-align: left; }
+.folder-open:hover { background: var(--hover); }
+.folder-open strong, .folder-open small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.folder-open small { color: var(--muted); font-size: 12px; }
+.bookmark-destination { display: grid; min-width: 0; gap: 3px; color: var(--muted); font-size: 11px; }
+.bookmark-destination select { min-width: 0; height: 30px; padding: 0 7px; border: 1px solid var(--border); border-radius: 5px; color: var(--text); background: var(--surface); cursor: pointer; }
+.bookmark-empty { min-height: 300px; }
+.inline-error { display: flex; align-items: center; gap: 8px; min-height: 42px; margin-top: 18px; padding: 0 12px; border: 1px solid #c5221f; border-radius: 6px; color: #c5221f; }
+.extension-list { display: grid; margin-top: 18px; }
+.extension-item { display: grid; grid-template-columns: 28px minmax(0, 1fr) 32px; align-items: center; gap: 12px; min-height: 88px; padding: 14px 10px; border-bottom: 1px solid var(--border); }
+.extension-copy { display: grid; min-width: 0; gap: 4px; }
+.extension-copy > div { display: flex; align-items: baseline; gap: 10px; }
+.extension-copy span, .extension-copy small { color: var(--muted); font-size: 12px; }
+.extension-copy p { margin: 0; color: var(--muted); }
+.extension-copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .settings-layout { display: grid; grid-template-columns: 240px minmax(0, 1fr); min-height: 100%; }
 .settings-layout aside { padding: 34px 18px; border-right: 1px solid var(--border); background: var(--toolbar-bg); }
 .settings-layout aside h1 { padding: 0 12px 22px; }
-.settings-layout aside button { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 40px; margin: 2px 0; padding: 0 12px; border: 0; border-radius: 6px; background: transparent; text-align: left; }
+.settings-layout aside button { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 40px; margin: 2px 0; padding: 0 12px; border: 0; border-radius: 6px; background: transparent; cursor: pointer; text-align: left; }
 .settings-layout aside button:hover { background: var(--hover); }
 .settings-layout aside button.is-active { color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
 .settings-content { padding: 42px clamp(28px, 6vw, 80px); }
@@ -206,4 +257,8 @@ button { color: inherit; }
   .release-status { align-items: stretch; flex-direction: column; }
   .segmented { width: 100%; min-width: 0; }
   .history-list > button { grid-template-columns: 1fr; gap: 5px; }
+  .bookmark-open { grid-template-columns: 1fr; gap: 5px; }
+  .bookmark-manager { grid-template-columns: 164px minmax(0, 1fr); }
+  .bookmark-list article { grid-template-columns: 24px minmax(0, 1fr) 32px; padding-block: 8px; }
+  .bookmark-destination { grid-column: 2 / 3; }
 }

@@ -21,6 +21,7 @@ let state: BrowserState = {
   bookmarks: [
     { id: 'docs', title: 'Archetype', url: 'https://github.com/shenzhepei/archetype-quick-browser', createdAt: 0 }
   ],
+  bookmarkFolders: [],
   history: [],
   settings: { theme: 'system', language: 'en' },
   siteInfo: { url: 'https://example.com', origin: 'https://example.com', connection: 'secure', permissions: [] }
@@ -67,7 +68,8 @@ export const demoBridge: ArchetypeBridge = {
     publish()
   },
   openInternal: async (path) => {
-    Object.assign(active(), { url: `archetype://${path}`, title: path.startsWith('history') ? 'History' : 'Settings' })
+    const title = path === 'history' ? 'History' : path === 'bookmarks' ? 'Bookmarks' : path === 'extensions' ? 'Extensions' : 'Settings'
+    Object.assign(active(), { url: `archetype://${path}`, title })
     publish()
   },
   openUtility: async (path) => {
@@ -76,7 +78,8 @@ export const demoBridge: ArchetypeBridge = {
     if (existing) {
       state = { ...state, activeTabId: existing.id }
     } else {
-      const tab = { id: crypto.randomUUID(), url: `archetype://${path}`, title: path === 'history' ? 'History' : 'Settings', loading: false, canGoBack: false, canGoForward: false }
+      const title = path === 'history' ? 'History' : path === 'bookmarks' ? 'Bookmarks' : path === 'extensions' ? 'Extensions' : 'Settings'
+      const tab = { id: crypto.randomUUID(), url: `archetype://${path}`, title, loading: false, canGoBack: false, canGoForward: false }
       state = { ...state, tabs: [...state.tabs, tab], activeTabId: tab.id }
     }
     publish()
@@ -89,9 +92,48 @@ export const demoBridge: ArchetypeBridge = {
     state = { ...state, history: [] }
     publish()
   },
+  removeBookmark: async (id) => {
+    state = { ...state, bookmarks: state.bookmarks.filter((bookmark) => bookmark.id !== id) }
+    publish()
+  },
+  createBookmarkFolder: async (name, parentId) => {
+    state = { ...state, bookmarkFolders: [...state.bookmarkFolders, { id: crypto.randomUUID(), name, parentId, createdAt: Date.now() }] }
+    publish()
+  },
+  removeBookmarkFolder: async (id) => {
+    const removed = new Set([id])
+    let changed = true
+    while (changed) {
+      changed = false
+      for (const folder of state.bookmarkFolders) {
+        if (folder.parentId && removed.has(folder.parentId) && !removed.has(folder.id)) {
+          removed.add(folder.id)
+          changed = true
+        }
+      }
+    }
+    state = {
+      ...state,
+      bookmarkFolders: state.bookmarkFolders.filter((folder) => !removed.has(folder.id)),
+      bookmarks: state.bookmarks.filter((bookmark) => !bookmark.parentId || !removed.has(bookmark.parentId))
+    }
+    publish()
+  },
+  moveBookmark: async (id, parentId) => {
+    state = {
+      ...state,
+      bookmarks: state.bookmarks.map((bookmark) => bookmark.id === id ? { ...bookmark, parentId } : bookmark)
+    }
+    publish()
+  },
   showMenu: async () => undefined,
   showTabMenu: async () => undefined,
+  showBookmarksBarMenu: async () => undefined,
+  showBookmarksOverflowMenu: async () => undefined,
   showSiteInfo: async () => undefined,
+  listExtensions: async () => [],
+  installExtension: async () => ({ ok: true, canceled: true, extensions: [] }),
+  removeExtension: async () => ({ ok: true, extensions: [] }),
   getAppVersion: async () => '0.1.0',
   checkForUpdates: async () => ({ currentVersion: '0.1.0', checkedAt: Date.now(), state: 'unavailable' }),
   openLatestRelease: async () => undefined,

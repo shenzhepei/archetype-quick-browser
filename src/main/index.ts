@@ -1,29 +1,41 @@
 import { join } from 'node:path'
 import { app, BaseWindow, dialog, ipcMain, Menu, nativeImage, nativeTheme, session, WebContentsView } from 'electron'
 import { BrowserController } from './controller'
+import { ExtensionService } from './extension-service'
+import { compactMenuTitle, recentBookmarks, recentHistory } from './recent-menu'
 import { ReleaseService } from './release'
 import { SiteSecurityService } from './site-security'
 import { BrowserStore } from './store'
-import type { BrowserSettings, ContentBounds, PopupPosition, TabMenuRequest } from '../shared/browser'
+import { buildBookmarkTree } from '../shared/bookmark-tree'
+import type { BookmarkFolderNode } from '../shared/bookmark-tree'
+import type { BookmarksOverflowRequest, BrowserSettings, ContentBounds, PopupPosition, TabMenuRequest } from '../shared/browser'
 
-let mainWindow: BaseWindow | undefined
-let shellView: WebContentsView | undefined
-let controller: BrowserController | undefined
+interface WindowContext {
+  window: BaseWindow
+  shellView: WebContentsView
+  controller: BrowserController
+}
+
+const windowContexts = new Map<number, WindowContext>()
+const browserStore = new BrowserStore()
 const releaseService = new ReleaseService(() => app.getVersion())
 const siteSecurity = new SiteSecurityService()
+let extensionService: ExtensionService
 
 function updateWindowsTitleBar(): void {
-  if (process.platform !== 'win32' || !mainWindow) return
-  mainWindow.setTitleBarOverlay({
-    color: nativeTheme.shouldUseDarkColors ? '#292b2f' : '#e8eaed',
-    symbolColor: nativeTheme.shouldUseDarkColors ? '#eef0f3' : '#202124',
-    height: 40
-  })
+  if (process.platform !== 'win32') return
+  for (const { window } of windowContexts.values()) {
+    window.setTitleBarOverlay({
+      color: nativeTheme.shouldUseDarkColors ? '#292b2f' : '#e8eaed',
+      symbolColor: nativeTheme.shouldUseDarkColors ? '#eef0f3' : '#202124',
+      height: 40
+    })
+  }
 }
 
 const menuLabels = {
-  en: { history: 'History', settings: 'Settings', reload: 'Reload', close: 'Close', closeOthers: 'Close other tabs', closeRight: 'Close tabs to the right', secure: 'Connection is secure', verifying: 'Checking secure connection', insecure: 'Connection is not secure', local: 'Local page', internal: 'Archetype internal page', noSite: 'No site information', certificate: 'Certificate details', permissions: 'Permissions', noPermissions: 'No permissions granted', blocked: 'Blocked', granted: 'Allowed', subject: 'Subject', issuer: 'Issuer', validFrom: 'Valid from', validUntil: 'Valid until', fingerprint: 'SHA-256 fingerprint', knownRoot: 'Issued by a known root', verification: 'Chromium verification', yes: 'Yes', no: 'No' },
-  'zh-CN': { history: '历史记录', settings: '设置', reload: '重新加载', close: '关闭', closeOthers: '关闭其他标签页', closeRight: '关闭右侧标签页', secure: '连接安全', verifying: '正在验证安全连接', insecure: '连接不安全', local: '本地页面', internal: 'Archetype 内部页面', noSite: '没有站点信息', certificate: '证书信息', permissions: '权限', noPermissions: '没有已授权权限', blocked: '已阻止', granted: '已允许', subject: '使用者', issuer: '颁发者', validFrom: '生效时间', validUntil: '到期时间', fingerprint: 'SHA-256 指纹', knownRoot: '已知根证书颁发', verification: 'Chromium 验证结果', yes: '是', no: '否' }
+  en: { newTab: 'Open new tab', newWindow: 'Open new window', extensions: 'Extensions', manageExtensions: 'Manage extensions', history: 'History', showFullHistory: 'Show full history', noRecentHistory: 'No recent history', bookmarks: 'Bookmarks', bookmarkThisTab: 'Bookmark this tab', removeCurrentBookmark: 'Remove bookmark for this tab', showAllBookmarks: 'Show all bookmarks', recentBookmarks: 'Recent bookmarks', noBookmarks: 'No bookmarks', emptyFolder: 'Empty folder', addPage: 'Add page', addFolder: 'Add folder', openBookmarkManager: 'Open bookmark manager', moreBookmarks: 'More bookmarks', print: 'Print', settings: 'Settings', reload: 'Reload', close: 'Close', closeOthers: 'Close other tabs', closeRight: 'Close tabs to the right', secure: 'Connection is secure', verifying: 'Checking secure connection', insecure: 'Connection is not secure', local: 'Local page', internal: 'Archetype internal page', noSite: 'No site information', certificate: 'Certificate details', permissions: 'Permissions', noPermissions: 'No permissions granted', blocked: 'Blocked', granted: 'Allowed', subject: 'Subject', issuer: 'Issuer', validFrom: 'Valid from', validUntil: 'Valid until', fingerprint: 'SHA-256 fingerprint', knownRoot: 'Issued by a known root', verification: 'Chromium verification', yes: 'Yes', no: 'No' },
+  'zh-CN': { newTab: '打开新的标签页', newWindow: '打开新的窗口', extensions: '扩展程序', manageExtensions: '管理扩展程序', history: '历史记录', showFullHistory: '显示完整历史记录', noRecentHistory: '没有最近历史记录', bookmarks: '书签', bookmarkThisTab: '为此标签页添加书签', removeCurrentBookmark: '移除此标签页的书签', showAllBookmarks: '显示所有书签', recentBookmarks: '最近添加的书签', noBookmarks: '没有书签', emptyFolder: '空文件夹', addPage: '添加网页', addFolder: '添加文件夹', openBookmarkManager: '打开书签管理器', moreBookmarks: '更多书签', print: '打印', settings: '设置', reload: '重新加载', close: '关闭', closeOthers: '关闭其他标签页', closeRight: '关闭右侧标签页', secure: '连接安全', verifying: '正在验证安全连接', insecure: '连接不安全', local: '本地页面', internal: 'Archetype 内部页面', noSite: '没有站点信息', certificate: '证书信息', permissions: '权限', noPermissions: '没有已授权权限', blocked: '已阻止', granted: '已允许', subject: '使用者', issuer: '颁发者', validFrom: '生效时间', validUntil: '到期时间', fingerprint: 'SHA-256 指纹', knownRoot: '已知根证书颁发', verification: 'Chromium 验证结果', yes: '是', no: '否' }
 } as const
 
 const menuLabel = (label: string): string => `${label}${'\u2002'.repeat(8)}`
@@ -36,48 +48,184 @@ function menuIcon(paths: string): Electron.NativeImage {
   return icon
 }
 
-function showBrowserMenu(position: PopupPosition): void {
-  if (!mainWindow || !controller || !Number.isFinite(position.x) || !Number.isFinite(position.y)) return
-  const language = controller.state().settings.language
+function bookmarkMenuIcon(favicon?: string): Electron.NativeImage | undefined {
+  if (!favicon?.startsWith('data:image/')) return undefined
+  const icon = nativeImage.createFromDataURL(favicon)
+  return icon.isEmpty() ? undefined : icon.resize({ width: 16, height: 16 })
+}
+
+function bookmarkMenuItems(
+  folders: BookmarkFolderNode[],
+  bookmarks: BookmarkFolderNode['bookmarks'],
+  controller: BrowserController,
+  emptyLabel: string
+): Electron.MenuItemConstructorOptions[] {
+  const items: Electron.MenuItemConstructorOptions[] = [
+    ...folders.map((folder) => ({
+      label: folder.name,
+      submenu: bookmarkMenuItems(folder.folders, folder.bookmarks, controller, emptyLabel)
+    })),
+    ...bookmarks.map((bookmark) => ({
+      label: compactMenuTitle(bookmark.title, bookmark.url),
+      icon: bookmarkMenuIcon(bookmark.favicon),
+      toolTip: bookmark.url,
+      click: () => controller.createTab(bookmark.url)
+    }))
+  ]
+  return items.length > 0 ? items : [{ label: emptyLabel, enabled: false }]
+}
+
+function showBrowserMenu(context: WindowContext, position: PopupPosition): void {
+  if (!Number.isFinite(position.x) || !Number.isFinite(position.y)) return
+  const { window, controller } = context
+  const state = controller.state()
+  const language = state.settings.language
   const labels = menuLabels[language]
-  const bounds = mainWindow.getContentBounds()
+  const bounds = window.getContentBounds()
   const x = Math.max(0, Math.min(Math.round(position.x), bounds.width))
   const y = Math.max(0, Math.min(Math.round(position.y), bounds.height))
+  const active = state.tabs.find((tab) => tab.id === state.activeTabId)
+  const bookmarkable = Boolean(active && /^(https?|file):/i.test(active.url))
+  const currentBookmark = active ? state.bookmarks.find((bookmark) => bookmark.url === active.url) : undefined
+  const historyItems = recentHistory(state.history)
+  const bookmarkItems = recentBookmarks(state.bookmarks)
+  const bookmarkTree = buildBookmarkTree(state.bookmarks, state.bookmarkFolders)
+  const historySubmenu: Electron.MenuItemConstructorOptions[] = [
+    { label: labels.showFullHistory, click: () => controller.openUtilityPage('history') },
+    { type: 'separator' },
+    ...(historyItems.length > 0
+      ? historyItems.map((entry) => ({
+          label: compactMenuTitle(entry.title, entry.url),
+          toolTip: entry.url,
+          click: () => controller.createTab(entry.url)
+        }))
+      : [{ label: labels.noRecentHistory, enabled: false }])
+  ]
+  const bookmarkSubmenu: Electron.MenuItemConstructorOptions[] = [
+    {
+      label: currentBookmark ? labels.removeCurrentBookmark : labels.bookmarkThisTab,
+      enabled: bookmarkable,
+      click: () => controller.toggleBookmark()
+    },
+    { label: labels.showAllBookmarks, click: () => controller.openUtilityPage('bookmarks') },
+    { type: 'separator' },
+    {
+      label: labels.recentBookmarks,
+      submenu: bookmarkItems.length > 0
+        ? bookmarkItems.map((bookmark) => ({
+            label: compactMenuTitle(bookmark.title, bookmark.url),
+            icon: bookmarkMenuIcon(bookmark.favicon),
+            toolTip: bookmark.url,
+            click: () => controller.createTab(bookmark.url)
+          }))
+        : [{ label: labels.noBookmarks, enabled: false }]
+    },
+    { type: 'separator' },
+    ...bookmarkMenuItems(bookmarkTree.folders, bookmarkTree.bookmarks, controller, labels.emptyFolder)
+  ]
 
   Menu.buildFromTemplate([
     {
+      label: menuLabel(labels.newTab),
+      icon: menuIcon('<path d="M12 5v14"/><path d="M5 12h14"/>'),
+      click: () => controller.createTab()
+    },
+    {
+      label: menuLabel(labels.newWindow),
+      icon: menuIcon('<rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="M9 9h12"/>'),
+      click: () => void createWindow(false)
+    },
+    { type: 'separator' },
+    {
       label: menuLabel(labels.history),
       icon: menuIcon('<path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l4 2"/>'),
-      click: () => controller?.openUtilityPage('history')
+      submenu: historySubmenu
+    },
+    {
+      label: menuLabel(labels.print),
+      icon: menuIcon('<path d="M6 9V2h12v7"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect width="12" height="8" x="6" y="14"/>'),
+      enabled: controller.canPrint(),
+      click: () => controller.print()
+    },
+    {
+      label: menuLabel(labels.bookmarks),
+      icon: menuIcon('<path d="m12 2 3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01z"/>'),
+      submenu: bookmarkSubmenu
+    },
+    {
+      label: menuLabel(labels.extensions),
+      icon: menuIcon('<path d="M15.39 4.39a1 1 0 0 0 1.68-.474 2.5 2.5 0 1 1 3.014 3.015 1 1 0 0 0-.474 1.68l1.683 1.682a2.414 2.414 0 0 1 0 3.414L19.61 15.39a1 1 0 0 1-1.68-.474 2.5 2.5 0 1 0-3.014 3.015 1 1 0 0 1 .474 1.68l-1.683 1.682a2.414 2.414 0 0 1-3.414 0L8.61 19.61a1 1 0 0 0-1.68.474 2.5 2.5 0 1 1-3.014-3.015 1 1 0 0 0 .474-1.68l-1.683-1.682a2.414 2.414 0 0 1 0-3.414L4.39 8.61a1 1 0 0 1 1.68.474 2.5 2.5 0 1 0 3.014-3.015 1 1 0 0 1-.474-1.68l1.683-1.682a2.414 2.414 0 0 1 3.414 0z"/>'),
+      submenu: [{ label: labels.manageExtensions, click: () => controller.openUtilityPage('extensions') }]
     },
     {
       label: menuLabel(labels.settings),
       icon: menuIcon('<path d="M4 21v-7"/><path d="M4 10V3"/><path d="M12 21v-9"/><path d="M12 8V3"/><path d="M20 21v-5"/><path d="M20 12V3"/><path d="M1 14h6"/><path d="M9 8h6"/><path d="M17 16h6"/>'),
-      click: () => controller?.openUtilityPage('settings/appearance')
+      click: () => controller.openUtilityPage('settings/appearance')
     }
-  ]).popup({ window: mainWindow, x, y })
+  ]).popup({ window, x, y })
 }
 
-function showTabMenu(request: TabMenuRequest): void {
-  if (!mainWindow || !controller || !Number.isFinite(request.x) || !Number.isFinite(request.y)) return
+function showTabMenu(context: WindowContext, request: TabMenuRequest): void {
+  if (!Number.isFinite(request.x) || !Number.isFinite(request.y)) return
+  const { window, controller } = context
   const state = controller.state()
   const index = state.tabs.findIndex((tab) => tab.id === request.tabId)
   if (index < 0) return
   const labels = menuLabels[state.settings.language]
-  const bounds = mainWindow.getContentBounds()
+  const bounds = window.getContentBounds()
   const x = Math.max(0, Math.min(Math.round(request.x), bounds.width))
   const y = Math.max(0, Math.min(Math.round(request.y), bounds.height))
   Menu.buildFromTemplate([
-    { label: labels.reload, click: () => controller?.reloadTab(request.tabId) },
+    { label: labels.reload, click: () => controller.reloadTab(request.tabId) },
     { type: 'separator' },
-    { label: labels.close, click: () => controller?.closeTab(request.tabId) },
-    { label: labels.closeOthers, enabled: state.tabs.length > 1, click: () => controller?.closeOtherTabs(request.tabId) },
-    { label: labels.closeRight, enabled: index < state.tabs.length - 1, click: () => controller?.closeTabsToRight(request.tabId) }
-  ]).popup({ window: mainWindow, x, y })
+    { label: labels.close, click: () => controller.closeTab(request.tabId) },
+    { label: labels.closeOthers, enabled: state.tabs.length > 1, click: () => controller.closeOtherTabs(request.tabId) },
+    { label: labels.closeRight, enabled: index < state.tabs.length - 1, click: () => controller.closeTabsToRight(request.tabId) }
+  ]).popup({ window, x, y })
 }
 
-function showSiteInfo(position: PopupPosition): void {
-  if (!mainWindow || !controller || !Number.isFinite(position.x) || !Number.isFinite(position.y)) return
+function popupPosition(window: BaseWindow, position: PopupPosition): { x: number; y: number } | undefined {
+  if (!Number.isFinite(position.x) || !Number.isFinite(position.y)) return undefined
+  const bounds = window.getContentBounds()
+  return {
+    x: Math.max(0, Math.min(Math.round(position.x), bounds.width)),
+    y: Math.max(0, Math.min(Math.round(position.y), bounds.height))
+  }
+}
+
+function showBookmarksBarMenu(context: WindowContext, position: PopupPosition): void {
+  const popup = popupPosition(context.window, position)
+  if (!popup) return
+  const labels = menuLabels[context.controller.state().settings.language]
+  Menu.buildFromTemplate([
+    { label: labels.addPage, enabled: context.controller.canAddActivePageBookmark(), click: () => context.controller.addActivePageBookmark() },
+    { label: labels.addFolder, click: () => context.controller.openBookmarkManager(true) },
+    { type: 'separator' },
+    { label: labels.openBookmarkManager, click: () => context.controller.openBookmarkManager() }
+  ]).popup({ window: context.window, ...popup })
+}
+
+function showBookmarksOverflowMenu(context: WindowContext, request: BookmarksOverflowRequest): void {
+  const popup = popupPosition(context.window, request)
+  if (!popup || !Array.isArray(request.bookmarkIds)) return
+  const state = context.controller.state()
+  const requested = new Set(request.bookmarkIds.filter((id): id is string => typeof id === 'string').slice(0, 1000))
+  const bookmarks = state.bookmarks.filter((bookmark) => requested.has(bookmark.id))
+  const labels = menuLabels[state.settings.language]
+  const template: Electron.MenuItemConstructorOptions[] = bookmarks.length > 0
+    ? bookmarks.map((bookmark) => ({
+        label: compactMenuTitle(bookmark.title, bookmark.url),
+        icon: bookmarkMenuIcon(bookmark.favicon),
+        toolTip: bookmark.url,
+        click: () => context.controller.navigate(bookmark.url)
+      }))
+    : [{ label: labels.noBookmarks, enabled: false }]
+  Menu.buildFromTemplate(template).popup({ window: context.window, ...popup })
+}
+
+function showSiteInfo(context: WindowContext, position: PopupPosition): void {
+  if (!Number.isFinite(position.x) || !Number.isFinite(position.y)) return
+  const { window, controller } = context
   const state = controller.state()
   const info = state.siteInfo
   const labels = menuLabels[state.settings.language]
@@ -106,7 +254,7 @@ function showSiteInfo(position: PopupPosition): void {
   if (info.certificate) {
     template.push({
       label: labels.certificate,
-      click: () => showCertificateDetails(info.certificate!, state.settings.language)
+      click: () => showCertificateDetails(window, info.certificate!, state.settings.language)
     })
   }
   template.push({ type: 'separator' }, { label: labels.permissions, enabled: false })
@@ -118,17 +266,16 @@ function showSiteInfo(position: PopupPosition): void {
       template.push({ label: `${name}: ${permission.state === 'granted' ? labels.granted : labels.blocked}`, enabled: false })
     }
   }
-  const bounds = mainWindow.getContentBounds()
+  const bounds = window.getContentBounds()
   const x = Math.max(0, Math.min(Math.round(position.x), bounds.width))
   const y = Math.max(0, Math.min(Math.round(position.y), bounds.height))
-  Menu.buildFromTemplate(template).popup({ window: mainWindow, x, y })
+  Menu.buildFromTemplate(template).popup({ window, x, y })
 }
 
-function showCertificateDetails(certificate: NonNullable<ReturnType<BrowserController['state']>['siteInfo']['certificate']>, language: 'en' | 'zh-CN'): void {
-  if (!mainWindow) return
+function showCertificateDetails(window: BaseWindow, certificate: NonNullable<ReturnType<BrowserController['state']>['siteInfo']['certificate']>, language: 'en' | 'zh-CN'): void {
   const labels = menuLabels[language]
   const locale = language === 'zh-CN' ? 'zh-CN' : 'en-US'
-  void dialog.showMessageBox(mainWindow, {
+  void dialog.showMessageBox(window, {
     type: 'info',
     title: labels.certificate,
     message: certificate.subjectName,
@@ -144,7 +291,7 @@ function showCertificateDetails(certificate: NonNullable<ReturnType<BrowserContr
   })
 }
 
-async function createWindow(): Promise<void> {
+async function createWindow(restoreTabs: boolean): Promise<void> {
   const windowChrome =
     process.platform === 'darwin'
       ? {
@@ -162,7 +309,7 @@ async function createWindow(): Promise<void> {
           }
         : {}
 
-  mainWindow = new BaseWindow({
+  const window = new BaseWindow({
     width: 1280,
     height: 820,
     minWidth: 760,
@@ -171,7 +318,7 @@ async function createWindow(): Promise<void> {
     backgroundColor: '#f4f5f7',
     ...windowChrome
   })
-  shellView = new WebContentsView({
+  const shellView = new WebContentsView({
     webPreferences: {
       preload: join(__dirname, '../preload/index.cjs'),
       contextIsolation: true,
@@ -179,36 +326,42 @@ async function createWindow(): Promise<void> {
       nodeIntegration: false
     }
   })
-  mainWindow.contentView.addChildView(shellView)
+  window.contentView.addChildView(shellView)
   const layoutShell = (): void => {
-    const { width, height } = mainWindow!.getContentBounds()
-    shellView!.setBounds({ x: 0, y: 0, width, height })
+    const { width, height } = window.getContentBounds()
+    shellView.setBounds({ x: 0, y: 0, width, height })
   }
   layoutShell()
-  mainWindow.on('resize', layoutShell)
+  window.on('resize', layoutShell)
 
-  controller = new BrowserController(mainWindow, shellView.webContents, new BrowserStore(), siteSecurity)
+  const controller = new BrowserController(window, shellView.webContents, browserStore, siteSecurity, restoreTabs)
+  const context = { window, shellView, controller }
+  windowContexts.set(shellView.webContents.id, context)
   if (process.env.ELECTRON_RENDERER_URL) await shellView.webContents.loadURL(process.env.ELECTRON_RENDERER_URL)
   else await shellView.webContents.loadFile(join(__dirname, '../renderer/index.html'))
   await controller.initialize()
   nativeTheme.themeSource = controller.state().settings.theme
   updateWindowsTitleBar()
-  mainWindow.on('closed', () => {
-    controller?.dispose()
-    shellView?.webContents.close()
-    controller = undefined
-    shellView = undefined
-    mainWindow = undefined
+  window.on('closed', () => {
+    windowContexts.delete(shellView.webContents.id)
+    controller.dispose()
+    shellView.webContents.close()
   })
 }
 
 app.whenReady().then(async () => {
-  siteSecurity.configure(session.fromPartition('persist:archetype'), () => controller?.refreshSiteInfo())
+  await browserStore.load()
+  const browserSession = session.fromPartition('persist:archetype')
+  siteSecurity.configure(browserSession, () => {
+    for (const { controller } of windowContexts.values()) controller.refreshSiteInfo()
+  })
+  extensionService = new ExtensionService(browserSession, browserStore)
+  await extensionService.initialize()
   registerIpc()
   nativeTheme.on('updated', updateWindowsTitleBar)
-  await createWindow()
+  await createWindow(true)
   app.on('activate', () => {
-    if (!mainWindow) void createWindow()
+    if (windowContexts.size === 0) void createWindow(true)
   })
 })
 
@@ -217,31 +370,68 @@ app.on('window-all-closed', () => {
 })
 
 function registerIpc(): void {
-  ipcMain.handle('browser:get-state', () => controller?.state())
-  ipcMain.handle('browser:new-tab', (_event, url?: string) => controller?.createTab(url))
-  ipcMain.handle('browser:select-tab', (_event, id: string) => controller?.selectTab(id))
-  ipcMain.handle('browser:close-tab', (_event, id: string) => controller?.closeTab(id))
-  ipcMain.handle('browser:navigate', (_event, input: string) => controller?.navigate(input))
-  ipcMain.handle('browser:back', () => controller?.back())
-  ipcMain.handle('browser:forward', () => controller?.forward())
-  ipcMain.handle('browser:reload', () => controller?.reload())
-  ipcMain.handle('browser:stop', () => controller?.stop())
-  ipcMain.handle('browser:toggle-bookmark', () => controller?.toggleBookmark())
-  ipcMain.handle('browser:open-internal', (_event, path: string) => controller?.navigate(`archetype://${path}`))
-  ipcMain.handle('browser:open-utility', (_event, path: 'history' | 'settings/appearance') => controller?.openUtilityPage(path))
-  ipcMain.handle('browser:update-settings', (_event, settings: Partial<BrowserSettings>) => {
-    controller?.updateSettings(settings)
+  const contextFor = (senderId: number): WindowContext | undefined => windowContexts.get(senderId)
+  ipcMain.handle('browser:get-state', (event) => contextFor(event.sender.id)?.controller.state())
+  ipcMain.handle('browser:new-tab', (event, url?: string) => contextFor(event.sender.id)?.controller.createTab(url))
+  ipcMain.handle('browser:select-tab', (event, id: string) => contextFor(event.sender.id)?.controller.selectTab(id))
+  ipcMain.handle('browser:close-tab', (event, id: string) => contextFor(event.sender.id)?.controller.closeTab(id))
+  ipcMain.handle('browser:navigate', (event, input: string) => contextFor(event.sender.id)?.controller.navigate(input))
+  ipcMain.handle('browser:back', (event) => contextFor(event.sender.id)?.controller.back())
+  ipcMain.handle('browser:forward', (event) => contextFor(event.sender.id)?.controller.forward())
+  ipcMain.handle('browser:reload', (event) => contextFor(event.sender.id)?.controller.reload())
+  ipcMain.handle('browser:stop', (event) => contextFor(event.sender.id)?.controller.stop())
+  ipcMain.handle('browser:toggle-bookmark', (event) => contextFor(event.sender.id)?.controller.toggleBookmark())
+  ipcMain.handle('browser:open-internal', (event, path: string) => {
+    const allowed = ['history', 'bookmarks', 'extensions', 'settings/appearance', 'settings/languages', 'settings/about']
+    if (allowed.includes(path)) contextFor(event.sender.id)?.controller.navigate(`archetype://${path}`)
+  })
+  ipcMain.handle('browser:open-utility', (event, path: 'history' | 'bookmarks' | 'extensions' | 'settings/appearance') => {
+    if (['history', 'bookmarks', 'extensions', 'settings/appearance'].includes(path)) {
+      contextFor(event.sender.id)?.controller.openUtilityPage(path)
+    }
+  })
+  ipcMain.handle('browser:update-settings', (event, settings: Partial<BrowserSettings>) => {
+    contextFor(event.sender.id)?.controller.updateSettings(settings)
     if (settings.theme) {
       nativeTheme.themeSource = settings.theme
       updateWindowsTitleBar()
     }
   })
-  ipcMain.handle('browser:clear-history', () => controller?.clearHistory())
-  ipcMain.handle('browser:show-menu', (_event, position: PopupPosition) => showBrowserMenu(position))
-  ipcMain.handle('browser:show-tab-menu', (_event, request: TabMenuRequest) => showTabMenu(request))
-  ipcMain.handle('browser:show-site-info', (_event, position: PopupPosition) => showSiteInfo(position))
+  ipcMain.handle('browser:clear-history', (event) => contextFor(event.sender.id)?.controller.clearHistory())
+  ipcMain.handle('browser:remove-bookmark', (event, id: string) => contextFor(event.sender.id)?.controller.removeBookmark(id))
+  ipcMain.handle('browser:create-bookmark-folder', (event, name: string, parentId?: string) => contextFor(event.sender.id)?.controller.createBookmarkFolder(name, parentId))
+  ipcMain.handle('browser:remove-bookmark-folder', (event, id: string) => contextFor(event.sender.id)?.controller.removeBookmarkFolder(id))
+  ipcMain.handle('browser:move-bookmark', (event, id: string, parentId?: string) => contextFor(event.sender.id)?.controller.moveBookmark(id, parentId))
+  ipcMain.handle('browser:show-menu', (event, position: PopupPosition) => {
+    const context = contextFor(event.sender.id)
+    if (context) showBrowserMenu(context, position)
+  })
+  ipcMain.handle('browser:show-tab-menu', (event, request: TabMenuRequest) => {
+    const context = contextFor(event.sender.id)
+    if (context) showTabMenu(context, request)
+  })
+  ipcMain.handle('browser:show-bookmarks-bar-menu', (event, position: PopupPosition) => {
+    const context = contextFor(event.sender.id)
+    if (context) showBookmarksBarMenu(context, position)
+  })
+  ipcMain.handle('browser:show-bookmarks-overflow-menu', (event, request: BookmarksOverflowRequest) => {
+    const context = contextFor(event.sender.id)
+    if (context) showBookmarksOverflowMenu(context, request)
+  })
+  ipcMain.handle('browser:show-site-info', (event, position: PopupPosition) => {
+    const context = contextFor(event.sender.id)
+    if (context) showSiteInfo(context, position)
+  })
+  ipcMain.handle('browser:list-extensions', () => extensionService.list())
+  ipcMain.handle('browser:install-extension', (event) => {
+    const context = contextFor(event.sender.id)
+    return context
+      ? extensionService.install(context.window, context.controller.state().settings.language)
+      : { ok: false, extensions: extensionService.list() }
+  })
+  ipcMain.handle('browser:remove-extension', (_event, id: string) => extensionService.remove(id))
   ipcMain.handle('browser:get-app-version', () => app.getVersion())
   ipcMain.handle('browser:check-for-updates', (_event, force?: boolean) => releaseService.check(force === true))
   ipcMain.handle('browser:open-latest-release', () => releaseService.openLatest())
-  ipcMain.on('browser:set-content-bounds', (_event, bounds: ContentBounds) => controller?.setBounds(bounds))
+  ipcMain.on('browser:set-content-bounds', (event, bounds: ContentBounds) => contextFor(event.sender.id)?.controller.setBounds(bounds))
 }

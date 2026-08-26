@@ -1,9 +1,19 @@
 export type ThemePreference = 'system' | 'light' | 'dark'
 export type Language = 'en' | 'zh-CN'
 
+export function isRecordableHistoryEntry(title: string, url: string): boolean {
+  const normalizedTitle = title.trim().toLocaleLowerCase()
+  return /^https?:/i.test(url)
+    && normalizedTitle.length > 0
+    && normalizedTitle !== 'new tab'
+    && normalizedTitle !== '新标签页'
+}
+
 export function internalPageTitle(url: string, language: Language): string {
   const chinese = language === 'zh-CN'
   if (url.includes('history')) return chinese ? '历史记录' : 'History'
+  if (url.includes('bookmarks')) return chinese ? '书签' : 'Bookmarks'
+  if (url.includes('extensions')) return chinese ? '扩展程序' : 'Extensions'
   if (url.includes('/languages')) return chinese ? '设置 - 语言' : 'Settings - Language'
   if (url.includes('/about')) return chinese ? '设置 - 关于 Archetype' : 'Settings - About Archetype'
   return chinese ? '设置 - 外观' : 'Settings - Appearance'
@@ -89,6 +99,15 @@ export interface Bookmark {
   id: string
   title: string
   url: string
+  favicon?: string
+  parentId?: string
+  createdAt: number
+}
+
+export interface BookmarkFolder {
+  id: string
+  name: string
+  parentId?: string
   createdAt: number
 }
 
@@ -104,10 +123,25 @@ export interface BrowserSettings {
   language: Language
 }
 
+export interface BrowserExtension {
+  id: string
+  name: string
+  version: string
+  description?: string
+  path: string
+}
+
+export interface ExtensionOperationResult {
+  ok: boolean
+  canceled?: boolean
+  extensions: BrowserExtension[]
+}
+
 export interface BrowserState {
   tabs: TabState[]
   activeTabId: string
   bookmarks: Bookmark[]
+  bookmarkFolders: BookmarkFolder[]
   history: HistoryEntry[]
   settings: BrowserSettings
   siteInfo: SiteInfo
@@ -129,6 +163,10 @@ export interface TabMenuRequest extends PopupPosition {
   tabId: string
 }
 
+export interface BookmarksOverflowRequest extends PopupPosition {
+  bookmarkIds: string[]
+}
+
 export interface ArchetypeBridge {
   platform: 'darwin' | 'win32' | 'linux' | 'web'
   getState(): Promise<BrowserState>
@@ -141,13 +179,22 @@ export interface ArchetypeBridge {
   reload(): Promise<void>
   stop(): Promise<void>
   toggleBookmark(): Promise<void>
-  openInternal(path: 'history' | 'settings/appearance' | 'settings/languages' | 'settings/about'): Promise<void>
-  openUtility(path: 'history' | 'settings/appearance'): Promise<void>
+  openInternal(path: 'history' | 'bookmarks' | 'extensions' | 'settings/appearance' | 'settings/languages' | 'settings/about'): Promise<void>
+  openUtility(path: 'history' | 'bookmarks' | 'extensions' | 'settings/appearance'): Promise<void>
   updateSettings(settings: Partial<BrowserSettings>): Promise<void>
   clearHistory(): Promise<void>
+  removeBookmark(id: string): Promise<void>
+  createBookmarkFolder(name: string, parentId?: string): Promise<void>
+  removeBookmarkFolder(id: string): Promise<void>
+  moveBookmark(id: string, parentId?: string): Promise<void>
   showMenu(position: PopupPosition): Promise<void>
   showTabMenu(request: TabMenuRequest): Promise<void>
+  showBookmarksBarMenu(position: PopupPosition): Promise<void>
+  showBookmarksOverflowMenu(request: BookmarksOverflowRequest): Promise<void>
   showSiteInfo(position: PopupPosition): Promise<void>
+  listExtensions(): Promise<BrowserExtension[]>
+  installExtension(): Promise<ExtensionOperationResult>
+  removeExtension(id: string): Promise<ExtensionOperationResult>
   getAppVersion(): Promise<string>
   checkForUpdates(force?: boolean): Promise<ReleaseStatus>
   openLatestRelease(): Promise<void>

@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import type { ArchetypeBridge, BrowserSettings, BrowserState, ContentBounds, PopupPosition, TabMenuRequest } from '../shared/browser'
+import type { ArchetypeBridge, BookmarksOverflowRequest, BrowserSettings, BrowserState, ContentBounds, PopupPosition, TabMenuRequest } from '../shared/browser'
 
 const bridge: ArchetypeBridge = {
   platform:
@@ -19,9 +19,18 @@ const bridge: ArchetypeBridge = {
   updateSettings: (settings: Partial<BrowserSettings>) =>
     ipcRenderer.invoke('browser:update-settings', settings),
   clearHistory: () => ipcRenderer.invoke('browser:clear-history'),
+  removeBookmark: (id) => ipcRenderer.invoke('browser:remove-bookmark', id),
+  createBookmarkFolder: (name, parentId) => ipcRenderer.invoke('browser:create-bookmark-folder', name, parentId),
+  removeBookmarkFolder: (id) => ipcRenderer.invoke('browser:remove-bookmark-folder', id),
+  moveBookmark: (id, parentId) => ipcRenderer.invoke('browser:move-bookmark', id, parentId),
   showMenu: (position: PopupPosition) => ipcRenderer.invoke('browser:show-menu', position),
   showTabMenu: (request: TabMenuRequest) => ipcRenderer.invoke('browser:show-tab-menu', request),
+  showBookmarksBarMenu: (position: PopupPosition) => ipcRenderer.invoke('browser:show-bookmarks-bar-menu', position),
+  showBookmarksOverflowMenu: (request: BookmarksOverflowRequest) => ipcRenderer.invoke('browser:show-bookmarks-overflow-menu', request),
   showSiteInfo: (position: PopupPosition) => ipcRenderer.invoke('browser:show-site-info', position),
+  listExtensions: () => ipcRenderer.invoke('browser:list-extensions'),
+  installExtension: () => ipcRenderer.invoke('browser:install-extension'),
+  removeExtension: (id) => ipcRenderer.invoke('browser:remove-extension', id),
   getAppVersion: () => ipcRenderer.invoke('browser:get-app-version'),
   checkForUpdates: (force = false) => ipcRenderer.invoke('browser:check-for-updates', force),
   openLatestRelease: () => ipcRenderer.invoke('browser:open-latest-release'),

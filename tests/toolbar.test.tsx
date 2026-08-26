@@ -7,6 +7,7 @@ const state: BrowserState = {
   tabs: [{ id: 'one', url: 'https://example.com', title: 'Example', loading: false, canGoBack: false, canGoForward: false }],
   activeTabId: 'one',
   bookmarks: [],
+  bookmarkFolders: [],
   history: [],
   settings: { theme: 'system', language: 'en' },
   siteInfo: { url: 'https://example.com', origin: 'https://example.com', connection: 'secure', permissions: [] }
