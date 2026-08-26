@@ -53,7 +53,7 @@ jobs:
           TEST_POSTGRES_URL: postgres://archetype:archetype@localhost:5432/archetype
           TEST_MYSQL_URL: mysql://demo:demo@localhost:3306/demo
       - run: test -s coverage/lcov.info
-      - uses: codecov/codecov-action@v5
+      - uses: codecov/codecov-action@v7
         with:
           use_oidc: true
           fail_ci_if_error: true
