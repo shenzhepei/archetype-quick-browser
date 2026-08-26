@@ -11,6 +11,30 @@ permissions:
 jobs:
   coverage:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16.13-bookworm
+        env:
+          POSTGRES_DB: archetype
+          POSTGRES_USER: archetype
+          POSTGRES_PASSWORD: archetype
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U archetype -d archetype"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_DATABASE: demo
+          MYSQL_USER: demo
+          MYSQL_PASSWORD: demo
+          MYSQL_ROOT_PASSWORD: root-demo
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "mysqladmin ping -h localhost -uroot -proot-demo"
+          --health-interval 5s --health-timeout 5s --health-retries 30
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -22,6 +46,12 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm test:coverage
+        env:
+          RUN_INTEGRATION_TESTS: '1'
+          TEST_PLATFORM_POSTGRES_URL: postgres://archetype:archetype@localhost:5432/archetype
+          TEST_POSTGRES_URL: postgres://archetype:archetype@localhost:5432/archetype
+          TEST_MYSQL_URL: mysql://demo:demo@localhost:3306/demo
+      - run: test -s coverage/lcov.info
       - uses: codecov/codecov-action@v5
         with:
           use_oidc: true

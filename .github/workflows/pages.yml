@@ -27,13 +27,13 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm build:web
+      - run: pnpm docs:check
         env:
-          VITE_BASE_PATH: /archetype-quick-browser/
+          DOCS_BASE: /archetype-runtime-browser/
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: out/renderer
+          path: apps/docs/.vitepress/dist
   deploy:
     environment:
       name: github-pages
@@ -44,3 +44,17 @@ jobs:
       - name: Deploy
         id: deployment
         uses: actions/deploy-pages@v4
+      - name: Verify deployed page and asset
+        shell: bash
+        run: |
+          set -euo pipefail
+          page_url="${{ steps.deployment.outputs.page_url }}"
+          for attempt in {1..20}; do
+            html="$(curl --fail --silent --show-error --location "${page_url}" || true)"
+            asset="$(printf '%s' "$html" | grep -Eo 'assets/[^" ]+\.(js|css)' | head -n 1 || true)"
+            if [ -n "$html" ] && [ -n "$asset" ] && curl --fail --silent --show-error --head "${page_url}${asset}" >/dev/null; then
+              exit 0
+            fi
+            sleep 10
+          done
+          exit 1

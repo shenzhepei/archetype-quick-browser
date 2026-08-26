@@ -3,5 +3,11 @@ out/
 dist/
 release/
 coverage/
+coverage-*/
+.archetype/
+dist-types/
+*.tsbuildinfo
+apps/docs/.vitepress/cache/
+apps/docs/.vitepress/dist/
 .DS_Store
 *.log
