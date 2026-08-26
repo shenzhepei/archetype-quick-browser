@@ -1,0 +1,14 @@
+{
+  "name": "@archetype/example-order-claim",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "exports": { ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" } },
+  "scripts": { "build": "tsc -b", "typecheck": "tsc -b --pretty false" },
+  "dependencies": {
+    "@archetype/db-adapters": "workspace:*",
+    "@archetype/function-sdk": "workspace:*",
+    "kysely": "catalog:",
+    "zod": "catalog:"
+  }
+}
