@@ -1,0 +1,148 @@
+name: archetype-runtime
+
+x-runtime: &runtime
+  restart: unless-stopped
+  networks: [runtime]
+
+x-runtime-build: &runtime-build
+  context: ../..
+  dockerfile: infra/docker/Dockerfile
+
+x-runtime-image: &runtime-image archetype-runtime:local
+
+services:
+  platform-postgres:
+    <<: *runtime
+    image: postgres:16.13-bookworm
+    environment:
+      POSTGRES_DB: archetype
+      POSTGRES_USER: archetype
+      POSTGRES_PASSWORD: ${PLATFORM_DATABASE_PASSWORD:-archetype}
+    ports: ["5432:5432"]
+    volumes: [platform-data:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U archetype -d archetype"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+
+  example-postgres:
+    <<: *runtime
+    image: postgres:16.13-bookworm
+    environment:
+      POSTGRES_DB: demo
+      POSTGRES_USER: demo
+      POSTGRES_PASSWORD: ${DEMO_POSTGRES_PASSWORD:-demo}
+    ports: ["5433:5432"]
+    volumes:
+      - demo-postgres-data:/var/lib/postgresql/data
+      - ../../examples/order-claim/migrations/postgres.sql:/docker-entrypoint-initdb.d/001-demo.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U demo -d demo"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+
+  example-mysql:
+    <<: *runtime
+    image: mysql:8.4
+    environment:
+      MYSQL_DATABASE: demo
+      MYSQL_USER: demo
+      MYSQL_PASSWORD: ${DEMO_MYSQL_PASSWORD:-demo}
+      MYSQL_ROOT_PASSWORD: ${DEMO_MYSQL_ROOT_PASSWORD:-root-demo}
+    ports: ["3307:3306"]
+    volumes:
+      - demo-mysql-data:/var/lib/mysql
+      - ../../examples/order-claim/migrations/mysql.sql:/docker-entrypoint-initdb.d/001-demo.sql:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-p${DEMO_MYSQL_ROOT_PASSWORD:-root-demo}"]
+      interval: 4s
+      timeout: 4s
+      retries: 40
+
+  gateway:
+    <<: *runtime
+    image: *runtime-image
+    build:
+      <<: *runtime-build
+    environment:
+      START_FILE: services/gateway/dist/server.js
+      PORT: 8787
+      PLATFORM_DATABASE_URL: postgres://archetype:${PLATFORM_DATABASE_PASSWORD:-archetype}@platform-postgres:5432/archetype
+      ARCHETYPE_PUBLIC_URL: ${ARCHETYPE_PUBLIC_URL:-http://localhost:8787}
+      ARCHETYPE_FUNCTION_HOST_URL: http://function-host:8790
+      ARCHETYPE_ADMIN_TOKEN: ${ARCHETYPE_ADMIN_TOKEN:-development-admin-token}
+      ARCHETYPE_SERVICE_TOKEN: ${ARCHETYPE_SERVICE_TOKEN:-development-service-token}
+      ARCHETYPE_MASTER_KEY: ${ARCHETYPE_MASTER_KEY:-development-master-key-change-me}
+      ARCHETYPE_CAPABILITY_KEY: ${ARCHETYPE_CAPABILITY_KEY:-development-capability-key-change-me}
+      ARCHETYPE_DEPLOYMENTS_DIR: /var/lib/archetype/deployments
+      ARCHETYPE_DEV_PROJECT_ID: order-claim-demo
+      ARCHETYPE_DEV_PROJECT_NAME: Order Claim Demo
+      ARCHETYPE_DEV_ORIGINS: http://localhost:4173,https://localhost:4173
+    ports: ["8787:8787"]
+    volumes: [deployments:/var/lib/archetype/deployments]
+    depends_on:
+      platform-postgres: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:8787/health').then(r=>{if(!r.ok)process.exit(1)})"]
+      interval: 5s
+      timeout: 4s
+      retries: 30
+
+  function-host:
+    <<: *runtime
+    image: *runtime-image
+    build:
+      <<: *runtime-build
+    environment:
+      START_FILE: services/function-host/dist/server.js
+      PORT: 8790
+      ARCHETYPE_SERVICE_TOKEN: ${ARCHETYPE_SERVICE_TOKEN:-development-service-token}
+      ARCHETYPE_RUNNER_PATH: /app/services/function-host/dist/runner.js
+      ARCHETYPE_FUNCTION_MEMORY_MB: 256
+      ARCHETYPE_FUNCTION_CONCURRENCY: 16
+    volumes: [deployments:/var/lib/archetype/deployments:ro]
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:8790/health').then(r=>{if(!r.ok)process.exit(1)})"]
+      interval: 5s
+      timeout: 4s
+      retries: 30
+
+  worker:
+    <<: *runtime
+    image: *runtime-image
+    build:
+      <<: *runtime-build
+    environment:
+      START_FILE: services/worker/dist/worker.js
+      PLATFORM_DATABASE_URL: postgres://archetype:${PLATFORM_DATABASE_PASSWORD:-archetype}@platform-postgres:5432/archetype
+      ARCHETYPE_PROJECT_ID: order-claim-demo
+      APP_DATABASE_DIALECT: postgres
+      APP_DATABASE_URL: postgres://demo:${DEMO_POSTGRES_PASSWORD:-demo}@example-postgres:5432/demo
+    volumes: [deployments:/var/lib/archetype/deployments:ro]
+    depends_on:
+      platform-postgres: { condition: service_healthy }
+      example-postgres: { condition: service_healthy }
+
+  caddy:
+    <<: *runtime
+    image: caddy:2.10.2-alpine
+    profiles: [production]
+    environment: { RUNTIME_DOMAIN: "${RUNTIME_DOMAIN:-runtime.example.com}" }
+    ports: ["80:80", "443:443"]
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+    depends_on:
+      gateway: { condition: service_healthy }
+
+networks:
+  runtime: {}
+
+volumes:
+  platform-data: {}
+  demo-postgres-data: {}
+  demo-mysql-data: {}
+  deployments: {}
+  caddy-data: {}

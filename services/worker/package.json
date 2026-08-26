@@ -1,0 +1,13 @@
+{
+  "name": "@archetype/worker",
+  "version": "1.0.0",
+  "type": "module",
+  "exports": { ".": { "types": "./dist/worker.d.ts", "default": "./dist/worker.js" } },
+  "scripts": { "build": "tsc -b", "dev": "tsx watch src/worker.ts", "start": "node dist/worker.js", "typecheck": "tsc -b --pretty false" },
+  "dependencies": {
+    "@archetype/db-adapters": "workspace:*",
+    "@archetype/function-sdk": "workspace:*",
+    "pg": "catalog:"
+  },
+  "devDependencies": { "@types/pg": "catalog:" }
+}
