@@ -16,7 +16,7 @@ jobs:
         os: [macos-14, windows-2025, ubuntu-24.04]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v4
         with:
           version: 10.33.2
@@ -33,7 +33,7 @@ jobs:
   docker:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Build runtime image
         run: docker build -f infra/docker/Dockerfile --build-arg START_FILE=services/gateway/dist/server.js .
 
@@ -64,7 +64,7 @@ jobs:
           --health-cmd "mysqladmin ping -h localhost -uroot -proot-demo"
           --health-interval 5s --health-timeout 5s --health-retries 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v4
         with:
           version: 10.33.2
