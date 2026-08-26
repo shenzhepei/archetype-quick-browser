@@ -1,0 +1,13 @@
+{
+  "name": "@archetype/cli",
+  "version": "1.0.0",
+  "type": "module",
+  "bin": { "archetype": "./dist/index.js" },
+  "exports": { ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" } },
+  "scripts": { "build": "tsc -b", "dev": "tsx src/index.ts", "typecheck": "tsc -b --pretty false" },
+  "dependencies": {
+    "@archetype/function-sdk": "workspace:*",
+    "@archetype/protocol": "workspace:*",
+    "commander": "catalog:"
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "name": "@archetype/browser-runtime",
+  "version": "1.0.0",
+  "type": "module",
+  "exports": { ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" } },
+  "scripts": { "build": "tsc -b", "typecheck": "tsc -b --pretty false" },
+  "dependencies": { "@archetype/protocol": "workspace:*" }
+}

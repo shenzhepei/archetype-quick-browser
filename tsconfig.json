@@ -1,21 +1,16 @@
 {
-  "compilerOptions": {
-    "target": "ES2023",
-    "useDefineForClassFields": true,
-    "lib": ["ES2023", "DOM", "DOM.Iterable"],
-    "allowJs": false,
-    "skipLibCheck": true,
-    "esModuleInterop": true,
-    "allowSyntheticDefaultImports": true,
-    "strict": true,
-    "forceConsistentCasingInFileNames": true,
-    "module": "ESNext",
-    "moduleResolution": "Bundler",
-    "resolveJsonModule": true,
-    "isolatedModules": true,
-    "noEmit": true,
-    "jsx": "react-jsx",
-    "types": ["node", "vitest/globals", "@testing-library/jest-dom"]
-  },
-  "include": ["src", "tests", "*.config.ts"]
+  "files": [],
+  "references": [
+    { "path": "packages/protocol" },
+    { "path": "packages/browser-runtime" },
+    { "path": "packages/function-sdk" },
+    { "path": "packages/db-adapters" },
+    { "path": "packages/generated-client" },
+    { "path": "packages/cli" },
+    { "path": "services/gateway" },
+    { "path": "services/function-host" },
+    { "path": "services/worker" },
+    { "path": "examples/order-claim" },
+    { "path": "apps/browser" }
+  ]
 }

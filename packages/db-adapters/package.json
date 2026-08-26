@@ -1,0 +1,14 @@
+{
+  "name": "@archetype/db-adapters",
+  "version": "1.0.0",
+  "type": "module",
+  "exports": { ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" } },
+  "scripts": { "build": "tsc -b", "typecheck": "tsc -b --pretty false" },
+  "dependencies": {
+    "@archetype/function-sdk": "workspace:*",
+    "kysely": "catalog:",
+    "mysql2": "catalog:",
+    "pg": "catalog:"
+  },
+  "devDependencies": { "@types/pg": "catalog:" }
+}
