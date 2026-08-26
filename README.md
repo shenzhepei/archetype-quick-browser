@@ -1,4 +1,4 @@
-# Archetype Quick Browser
+# Archetype Runtime Browser
 
 <!-- repo-languages:start -->
 English | [简体中文](README-zh-CN.md)
@@ -7,7 +7,6 @@ English | [简体中文](README-zh-CN.md)
 <!-- repo-badges:start -->
 [![Node.js 24](https://img.shields.io/badge/Node.js-24-339933?style=flat-square&logo=nodedotjs&logoColor=white)](https://nodejs.org)
 [![pnpm 10.33.2](https://img.shields.io/badge/pnpm-10.33.2-F69220?style=flat-square&logo=pnpm&logoColor=white)](https://pnpm.io)
-[![React 19.2.8](https://img.shields.io/badge/React-19.2.8-61DAFB?style=flat-square&logo=react&logoColor=white)](https://react.dev)
 [![Vite 7.3.6](https://img.shields.io/badge/Vite-7.3.6-646CFF?style=flat-square&logo=vite&logoColor=white)](https://vite.dev)
 [![TypeScript 6.0.3](https://img.shields.io/badge/TypeScript-6.0.3-3178C6?style=flat-square&logo=typescript&logoColor=white)](https://www.typescriptlang.org)
 [![Sass 1.103.1](https://img.shields.io/badge/Sass-1.103.1-CC6699?style=flat-square&logo=sass&logoColor=white)](https://sass-lang.com)
@@ -16,66 +15,68 @@ English | [简体中文](README-zh-CN.md)
 [![Sponsor](https://img.shields.io/github/sponsors/shenzhepei?style=flat-square&logo=githubsponsors&label=Sponsor)](https://github.com/sponsors/shenzhepei)
 <!-- repo-badges:end -->
 
-Archetype is a focused desktop browser whose webpages run in Electron's bundled Chromium. React,
-TypeScript, Vite, and SCSS implement the Browser Chrome; websites remain isolated in sandboxed
-`WebContentsView` instances with Chromium JavaScript, Web APIs, networking, and site storage.
+Archetype Runtime Browser lets a top-level HTTPS application call trusted, self-hosted Node.js functions through `navigator.archetype`. Database credentials, OIDC tokens, device proofs, queues, and transaction logic stay outside website JavaScript.
 
-[Browser Chrome preview](https://shenzhepei.github.io/archetype-quick-browser/)
+[Read the documentation](https://shenzhepei.github.io/archetype-runtime-browser/) · [Download releases](https://github.com/shenzhepei/archetype-runtime-browser/releases)
 
-![Archetype browser preview](docs/preview.webp)
+![Archetype Runtime Browser](docs/preview.webp)
 
-## Features
+## What It Includes
 
-- Independent Chromium tabs with preserved state, title, favicon, and loading feedback.
-- Address search, back, forward, reload, stop, bookmark, and managed popup workflows.
-- Persistent bookmarks, browsing history, tabs, theme, and language preferences.
-- Chromium-managed Cookies, cache, localStorage, IndexedDB, and Service Workers.
-- Native `archetype://history` and `archetype://settings/*` views inside the Browser Chrome.
-- System, light, and dark appearance modes plus English and Simplified Chinese UI.
+- An Electron/Chromium browser with tabs, navigation, site permissions, runtime status, themes, and persistent English/Simplified Chinese localization.
+- A frozen `navigator.archetype` API for eligible top-level HTTPS and localhost pages. HTTP, files, internal pages, iframes, and Service Workers are excluded.
+- A Docker self-hosted gateway, isolated function host, durable worker, platform PostgreSQL, example PostgreSQL/MySQL, and optional Caddy edge.
+- Origin-bound device keys, OIDC Authorization Code with PKCE, 60-second resource capabilities, signed invocation proofs, replay detection, auditing, and AES-256-GCM envelope-encrypted database secrets.
+- PostgreSQL/MySQL adapters, transactional outbox, leased jobs, fencing tokens, retries, dead letters, and an atomic order-claim example.
+- A deployment CLI and typed function, worker, protocol, and generated-client packages.
 
-## Development
+The browser never accepts arbitrary SQL from a website and never exposes a database URL to page JavaScript. Authorization remains business logic enforced by trusted functions, identity, transactions, and database constraints.
 
-Install Node.js 24 or newer and enable Corepack:
+## Quick Start
+
+Requires Node.js 24, pnpm 10.33.2, Docker, and Docker Compose.
 
 ```bash
 corepack enable
-pnpm install
-pnpm dev
+pnpm install --frozen-lockfile
+cp infra/docker/.env.example infra/docker/.env
+pnpm docker:up
 ```
 
-`pnpm dev` is the startup command. It opens the Electron application; a normal web browser can only
-show the static Browser Chrome preview and cannot host Electron `WebContentsView` pages.
-
-Build and test with:
+In another terminal:
 
 ```bash
 pnpm typecheck
-pnpm test:coverage
-pnpm build
+pnpm test
+pnpm dev
 ```
 
-Create unsigned macOS DMG and ZIP artifacts with `pnpm package:mac`. Create Windows NSIS and ZIP
-artifacts with `pnpm package:win` on Windows or a host with the required Wine tooling.
+See the [self-hosting guide](https://shenzhepei.github.io/archetype-runtime-browser/guide/self-hosting) and [order claim tutorial](https://shenzhepei.github.io/archetype-runtime-browser/guide/data-jobs) for project, origin, database, and deployment setup.
 
-## Architecture
+## Workspace
 
-| Module | Responsibility |
+| Path | Responsibility |
 | --- | --- |
-| `src/main` | Electron window, Chromium tabs, navigation, session, persistence, and IPC handlers |
-| `src/preload` | Typed, allowlisted bridge exposed only to the Browser Chrome |
-| `src/renderer` | React Browser Chrome, internal pages, themes, and runtime localization |
-| `src/shared` | Process-neutral state and command contracts |
+| `apps/browser` | Electron browser shell and page runtime bridge |
+| `apps/docs` | English and Simplified Chinese VitePress documentation |
+| `services/gateway` | Discovery, identity, policy, secrets, idempotency, audit, and routing |
+| `services/function-host` | Digest-verified Node.js function subprocesses |
+| `services/worker` | Outbox dispatch, queue leases, retries, and dead letters |
+| `packages/*` | Protocol, SDKs, adapters, typed client, and CLI |
+| `examples/order-claim` | PostgreSQL/MySQL concurrency and worker example |
+| `infra/docker` | Self-hosted runtime images and Compose stack |
 
-The [PRD](docs/prd/01-Archetype-Chromium浏览器-PRD.md) and
-[detailed design](docs/detailed-design/01-Archetype-Chromium浏览器详设.md) define the current scope and
-remaining release work. The prior Rust HTML/CSS renderer has been removed rather than retained as a
-fallback.
+The [product requirements](docs/prd/02-Archetype-Runtime-PRD.md) and [detailed design](docs/detailed-design/02-Archetype-Runtime-Design.md) define the security and execution boundaries.
 
-## Status
+## Build And Release
 
-The Chromium architecture and core browser workflows are implemented. Permissions currently default
-to deny. Downloads UI, certificate-error UX, crash recovery, code signing, notarization, auto-update,
-and Linux packages remain before a production release.
+```bash
+pnpm test:coverage
+pnpm build
+pnpm package:mac
+```
+
+Semantic tags such as `v1.0.0` create a Windows x64 NSIS installer and macOS arm64/x64 DMG and ZIP artifacts. Initial packages are unsigned and not notarized, so Windows SmartScreen or macOS Gatekeeper may report an unknown publisher. This project does not provide scripts that bypass operating-system security controls.
 
 ## License
 
