@@ -1,0 +1,14 @@
+{
+  "name": "@archetype/function-host",
+  "version": "1.0.0",
+  "type": "module",
+  "exports": { ".": { "types": "./dist/server.d.ts", "default": "./dist/server.js" } },
+  "scripts": { "build": "tsc -b", "dev": "tsx watch src/server.ts", "start": "node dist/server.js", "typecheck": "tsc -b --pretty false" },
+  "dependencies": {
+    "@archetype/db-adapters": "workspace:*",
+    "@archetype/function-sdk": "workspace:*",
+    "@archetype/protocol": "workspace:*",
+    "fastify": "catalog:",
+    "zod": "catalog:"
+  }
+}

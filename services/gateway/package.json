@@ -1,0 +1,16 @@
+{
+  "name": "@archetype/gateway",
+  "version": "1.0.0",
+  "type": "module",
+  "exports": { ".": { "types": "./dist/server.d.ts", "default": "./dist/server.js" } },
+  "scripts": { "build": "tsc -b", "dev": "tsx watch src/server.ts", "start": "node dist/server.js", "typecheck": "tsc -b --pretty false" },
+  "dependencies": {
+    "@archetype/protocol": "workspace:*",
+    "@fastify/cors": "catalog:",
+    "fastify": "catalog:",
+    "jose": "catalog:",
+    "pg": "catalog:",
+    "zod": "catalog:"
+  },
+  "devDependencies": { "@types/pg": "catalog:" }
+}
