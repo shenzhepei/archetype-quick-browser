@@ -1,4 +1,4 @@
-FROM node:24.13.0-bookworm-slim AS build
+FROM node:26.6.0-bookworm-slim AS build
 
 ENV COREPACK_HOME=/corepack
 ENV PATH=/corepack:$PATH
@@ -23,7 +23,7 @@ RUN pnpm exec tsc -b --force \
   services/function-host \
   services/worker
 
-FROM node:24.13.0-bookworm-slim AS runtime
+FROM node:26.6.0-bookworm-slim AS runtime
 ENV NODE_ENV=production
 WORKDIR /app
 COPY --from=build /app /app
