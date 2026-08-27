@@ -12,10 +12,12 @@
   "scripts": {
     "build": "pnpm -r --if-present build",
     "build:browser": "pnpm --filter @archetype/browser build",
+    "build:console": "pnpm --filter @archetype/console build",
     "build:docs": "pnpm --filter @archetype/docs build",
     "docs:check": "node scripts/check-docs.mjs && pnpm build:docs",
     "dev": "pnpm --filter @archetype/browser dev",
     "dev:docs": "pnpm --filter @archetype/docs dev",
+    "dev:console": "pnpm --filter @archetype/console dev",
     "dev:runtime": "pnpm --parallel --filter @archetype/gateway --filter @archetype/function-host --filter @archetype/worker dev",
     "docker:up": "docker-compose -f infra/docker/compose.yml up --build",
     "docker:down": "docker-compose -f infra/docker/compose.yml down -v",

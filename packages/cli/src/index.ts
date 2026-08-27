@@ -18,12 +18,13 @@ const program = new Command()
 function settings() {
   return {
     gateway: process.env.ARCHETYPE_GATEWAY_URL ?? 'http://localhost:8787',
-    token: process.env.ARCHETYPE_ADMIN_TOKEN ?? 'development-admin-token'
+    token: process.env.ARCHETYPE_ADMIN_TOKEN
   }
 }
 
 async function admin(path: string, init: RequestInit = {}): Promise<any> {
   const { gateway, token } = settings()
+  if (!token) throw new Error('Set ARCHETYPE_ADMIN_TOKEN for administrative automation.')
   const response = await fetch(`${gateway}${path}`, {
     ...init,
     headers: { 'content-type': 'application/json', authorization: `Bearer ${token}`, ...init.headers }
@@ -62,7 +63,7 @@ const runtime = program.command('runtime')
 runtime.command('up').description('Start the self-hosted Docker runtime.').action(() => run('docker-compose', ['-f', 'infra/docker/compose.yml', 'up', '--build']))
 
 const project = program.command('project')
-project.command('create').requiredOption('--name <name>').action(async ({ name }) => console.log(JSON.stringify(await admin('/v1/admin/projects', { method: 'POST', body: JSON.stringify({ name }) }), null, 2)))
+project.command('create').requiredOption('--name <name>').option('--organization <id>', 'Control-plane organization ID', process.env.ARCHETYPE_CONTROL_ORGANIZATION_ID).action(async ({ name, organization }) => console.log(JSON.stringify(await admin('/v1/admin/projects', { method: 'POST', body: JSON.stringify({ name, organizationId: organization }) }), null, 2)))
 
 const origin = program.command('origin')
 origin.command('add').requiredOption('--project <id>').requiredOption('--origin <origin>').action(async (options) => {

@@ -1,16 +1,19 @@
 import { createHash, randomUUID } from 'node:crypto'
+import { existsSync } from 'node:fs'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import Fastify, { type FastifyInstance } from 'fastify'
 import cors from '@fastify/cors'
+import fastifyStatic from '@fastify/static'
 import { capabilityRequestSchema, operationDescriptorSchema, projectDescriptorSchema, runtimeDiscoverySchema, sessionSummarySchema, signedInvokeRequestSchema, topicSchema } from '@archetype/protocol'
 import { z } from 'zod'
 import { AuthService } from './auth.js'
+import { ControlAuthService, controlOidcFromEnvironment } from './control-auth.js'
 import { deviceKeyDigest, issueCapability, verifyCapability } from './capability.js'
 import { invocationDigest, verifyDeviceProof } from './device-proof.js'
 import { PlatformStore } from './store.js'
 
-const adminToken = process.env.ARCHETYPE_ADMIN_TOKEN ?? 'development-admin-token'
+const adminToken = process.env.ARCHETYPE_ADMIN_TOKEN
 const serviceToken = process.env.ARCHETYPE_SERVICE_TOKEN ?? 'development-service-token'
 const publicUrl = process.env.ARCHETYPE_PUBLIC_URL ?? 'http://localhost:8787'
 const deploymentsDirectory = process.env.ARCHETYPE_DEPLOYMENTS_DIR ?? join(process.cwd(), '.archetype', 'deployments')
@@ -22,7 +25,7 @@ function bearer(header: string | undefined): string | undefined {
 }
 
 function requireAdmin(header: string | undefined): void {
-  if (bearer(header) !== adminToken) throw Object.assign(new Error('Administrative token is invalid.'), { statusCode: 401 })
+  if (!adminToken || bearer(header) !== adminToken) throw Object.assign(new Error('Administrative automation token is invalid or disabled.'), { statusCode: 401 })
 }
 
 function safeOrigin(value: string): string {
@@ -37,6 +40,26 @@ export async function buildServer(store: PlatformStore): Promise<FastifyInstance
   const server = Fastify({ logger: { redact: ['req.headers.authorization', 'body.databaseUrl', 'body.artifact'] }, bodyLimit: 12 * 1024 * 1024 })
   await server.register(cors, { origin: false })
   const auth = new AuthService(store, publicUrl)
+  const control = new ControlAuthService(store, publicUrl, controlOidcFromEnvironment(), process.env.ARCHETYPE_CONTROL_DEV_LOGIN === 'true')
+  const controlOrigin = new URL(publicUrl).origin
+
+  const requireControlOrigin = (request: Parameters<typeof control.requireSession>[0]): void => {
+    if (request.headers.origin !== controlOrigin) {
+      throw Object.assign(new Error('Control-plane writes require a same-origin request.'), { statusCode: 403 })
+    }
+  }
+
+  const activateDeployment = async (projectId: string, body: { sha256: string; artifact: string; operations: z.infer<typeof operationDescriptorSchema>[] }, actor?: string) => {
+    const bytes = Buffer.from(body.artifact, 'base64')
+    if (createHash('sha256').update(bytes).digest('hex') !== body.sha256) throw Object.assign(new Error('Deployment digest does not match its artifact.'), { statusCode: 400 })
+    const projectDirectory = join(deploymentsDirectory, projectId)
+    await mkdir(projectDirectory, { recursive: true })
+    const path = join(projectDirectory, `${body.sha256}.mjs`)
+    await writeFile(path, bytes, { mode: 0o600 })
+    await store.setDeployment({ projectId, sha256: body.sha256, path, operations: body.operations })
+    await store.audit(projectId, 'deployment.activated', { sha256: body.sha256, operations: body.operations.map((operation) => operation.name), ...(actor ? { actor } : {}) })
+    return { projectId, sha256: body.sha256, operations: body.operations }
+  }
 
   server.setErrorHandler((error, _request, reply) => {
     const normalized = error instanceof Error ? error : new Error('Unexpected gateway error.')
@@ -45,6 +68,12 @@ export async function buildServer(store: PlatformStore): Promise<FastifyInstance
   })
 
   server.get('/health', async () => ({ ok: true, service: 'archetype-gateway' }))
+
+  const consoleDirectory = process.env.ARCHETYPE_CONSOLE_DIR ?? join(process.cwd(), 'apps', 'console', 'dist')
+  if (existsSync(consoleDirectory)) {
+    await server.register(fastifyStatic, { root: consoleDirectory, prefix: '/console/', decorateReply: true })
+    server.get('/console', async (_request, reply) => reply.redirect('/console/'))
+  }
 
   server.get('/v1/projects/:projectId/manifest', async (request, reply) => {
     const { projectId } = request.params as { projectId: string }
@@ -88,6 +117,127 @@ export async function buildServer(store: PlatformStore): Promise<FastifyInstance
     const token = bearer(request.headers.authorization)
     if (token) await store.revokeSession(token)
     return reply.status(204).send()
+  })
+
+  server.get('/v1/control/auth/login', async (request, reply) => {
+    const returnTo = z.string().optional().parse((request.query as { returnTo?: string }).returnTo)
+    return reply.redirect(await control.login(returnTo))
+  })
+
+  server.get('/v1/control/auth/dev', async (request, reply) => {
+    const state = z.string().parse((request.query as { state?: string }).state)
+    const result = await control.completeDevelopment(state)
+    control.setSessionCookie(reply, result.session.token)
+    return reply.redirect(result.returnTo)
+  })
+
+  server.get('/v1/control/auth/callback', async (request, reply) => {
+    const query = z.object({ state: z.string(), code: z.string() }).parse(request.query)
+    const result = await control.completeOidc(query.state, query.code)
+    control.setSessionCookie(reply, result.session.token)
+    return reply.redirect(result.returnTo)
+  })
+
+  server.get('/v1/control/session', async (request, reply) => {
+    const session = await control.session(request)
+    if (!session) return reply.status(401).send({ error: { code: 'CONTROL_AUTH_REQUIRED', message: 'Administrator sign-in is required.' } })
+    const organizations = await store.organizationsForSubject(session.subject)
+    return { subject: session.subject, displayName: session.displayName, expiresAt: session.expiresAt, organizations }
+  })
+
+  server.delete('/v1/control/session', async (request, reply) => {
+    requireControlOrigin(request)
+    const token = control.token(request)
+    if (token) await store.revokeControlSession(token)
+    control.clearSessionCookie(reply)
+    return reply.status(204).send()
+  })
+
+  server.get('/v1/control/organizations', async (request) => {
+    const session = await control.requireSession(request)
+    return store.organizationsForSubject(session.subject)
+  })
+
+  server.post('/v1/control/organizations/:organizationId/members', async (request, reply) => {
+    requireControlOrigin(request)
+    const session = await control.requireSession(request)
+    const { organizationId } = request.params as { organizationId: string }
+    await control.requireOrganizationPermission(session.subject, organizationId, 'member:write')
+    const body = z.object({ subject: z.string().min(1).max(255), displayName: z.string().max(255).optional(), role: z.enum(['owner', 'admin', 'developer', 'operator', 'auditor']) }).parse(request.body)
+    await store.addControlMember(organizationId, body.subject, body.displayName, body.role)
+    await store.audit(null, 'control.member.updated', { organizationId, subject: body.subject, role: body.role, actor: session.subject })
+    return reply.status(201).send({ organizationId, ...body })
+  })
+
+  server.get('/v1/control/organizations/:organizationId/members', async (request) => {
+    const session = await control.requireSession(request)
+    const { organizationId } = request.params as { organizationId: string }
+    await control.requireOrganizationPermission(session.subject, organizationId, 'organization:read')
+    return store.controlMembers(organizationId)
+  })
+
+  server.get('/v1/control/projects', async (request) => {
+    const session = await control.requireSession(request)
+    return store.projectsForSubject(session.subject)
+  })
+
+  server.post('/v1/control/projects', async (request, reply) => {
+    requireControlOrigin(request)
+    const session = await control.requireSession(request)
+    const body = z.object({ organizationId: z.string().min(1), name: z.string().min(2).max(100) }).parse(request.body)
+    await control.requireOrganizationPermission(session.subject, body.organizationId, 'project:create')
+    const project = await store.createProject(body.name, body.organizationId)
+    await store.audit(project.id, 'project.created', { organizationId: body.organizationId, actor: session.subject })
+    return reply.status(201).send(project)
+  })
+
+  server.post('/v1/control/projects/:projectId/origins', async (request, reply) => {
+    requireControlOrigin(request)
+    const session = await control.requireSession(request)
+    const { projectId } = request.params as { projectId: string }
+    await control.requireProjectPermission(session.subject, projectId, 'project:configure')
+    const origin = safeOrigin(z.object({ origin: z.string() }).parse(request.body).origin)
+    await store.addOrigin(projectId, origin)
+    await store.audit(projectId, 'origin.added', { origin, actor: session.subject })
+    return reply.status(201).send({ projectId, origin })
+  })
+
+  server.put('/v1/control/projects/:projectId/oidc', async (request) => {
+    requireControlOrigin(request)
+    const session = await control.requireSession(request)
+    const { projectId } = request.params as { projectId: string }
+    await control.requireProjectPermission(session.subject, projectId, 'project:configure')
+    const oidc = z.object({ issuer: z.url(), clientId: z.string(), clientSecret: z.string().optional() }).parse(request.body)
+    await store.setOidc(projectId, oidc)
+    await store.audit(projectId, 'oidc.configured', { issuer: oidc.issuer, actor: session.subject })
+    return { ok: true }
+  })
+
+  server.put('/v1/control/projects/:projectId/database', async (request) => {
+    requireControlOrigin(request)
+    const session = await control.requireSession(request)
+    const { projectId } = request.params as { projectId: string }
+    await control.requireProjectPermission(session.subject, projectId, 'project:configure')
+    const body = z.object({ dialect: z.enum(['postgres', 'mysql']), databaseUrl: z.string().min(10) }).parse(request.body)
+    await store.setConnection(projectId, body.dialect, body.databaseUrl)
+    await store.audit(projectId, 'database.configured', { dialect: body.dialect, actor: session.subject })
+    return { ok: true }
+  })
+
+  server.get('/v1/control/projects/:projectId/logs', async (request) => {
+    const session = await control.requireSession(request)
+    const { projectId } = request.params as { projectId: string }
+    await control.requireProjectPermission(session.subject, projectId, 'audit:read')
+    return store.logs(projectId)
+  })
+
+  server.post('/v1/control/projects/:projectId/deployments', async (request) => {
+    requireControlOrigin(request)
+    const session = await control.requireSession(request)
+    const { projectId } = request.params as { projectId: string }
+    await control.requireProjectPermission(session.subject, projectId, 'deployment:write')
+    const body = z.object({ sha256: z.string().regex(/^[a-f0-9]{64}$/), artifact: z.string(), operations: z.array(operationDescriptorSchema) }).parse(request.body)
+    return activateDeployment(projectId, body, session.subject)
   })
 
   server.post('/v1/capabilities', async (request, reply) => {
@@ -224,8 +374,8 @@ export async function buildServer(store: PlatformStore): Promise<FastifyInstance
 
   server.post('/v1/admin/projects', async (request) => {
     requireAdmin(request.headers.authorization)
-    const body = z.object({ name: z.string().min(2).max(100) }).parse(request.body)
-    return store.createProject(body.name)
+    const body = z.object({ name: z.string().min(2).max(100), organizationId: z.string().optional() }).parse(request.body)
+    return store.createProject(body.name, body.organizationId ?? null)
   })
 
   server.post('/v1/admin/projects/:projectId/origins', async (request, reply) => {
@@ -258,15 +408,7 @@ export async function buildServer(store: PlatformStore): Promise<FastifyInstance
     requireAdmin(request.headers.authorization)
     const { projectId } = request.params as { projectId: string }
     const body = z.object({ sha256: z.string().regex(/^[a-f0-9]{64}$/), artifact: z.string(), operations: z.array(operationDescriptorSchema) }).parse(request.body)
-    const bytes = Buffer.from(body.artifact, 'base64')
-    if (createHash('sha256').update(bytes).digest('hex') !== body.sha256) throw Object.assign(new Error('Deployment digest does not match its artifact.'), { statusCode: 400 })
-    const projectDirectory = join(deploymentsDirectory, projectId)
-    await mkdir(projectDirectory, { recursive: true })
-    const path = join(projectDirectory, `${body.sha256}.mjs`)
-    await writeFile(path, bytes, { mode: 0o600 })
-    await store.setDeployment({ projectId, sha256: body.sha256, path, operations: body.operations })
-    await store.audit(projectId, 'deployment.activated', { sha256: body.sha256, operations: body.operations.map((operation) => operation.name) })
-    return { projectId, sha256: body.sha256, operations: body.operations }
+    return activateDeployment(projectId, body)
   })
 
   server.get('/v1/admin/projects/:projectId/logs', async (request) => {
@@ -294,8 +436,11 @@ async function start(): Promise<void> {
       await new Promise((resolve) => setTimeout(resolve, 1_000))
     }
   }
+  const bootstrapOrganizationId = process.env.ARCHETYPE_CONTROL_ORGANIZATION_ID ?? 'default'
+  const bootstrapSubjects = (process.env.ARCHETYPE_CONTROL_BOOTSTRAP_SUBJECTS ?? (process.env.ARCHETYPE_CONTROL_DEV_LOGIN === 'true' ? 'development-admin' : '')).split(',').map((value) => value.trim()).filter(Boolean)
+  await store.ensureBootstrapOrganization(bootstrapOrganizationId, process.env.ARCHETYPE_CONTROL_ORGANIZATION_NAME ?? 'Default organization', bootstrapSubjects)
   const devProject = process.env.ARCHETYPE_DEV_PROJECT_ID
-  if (devProject) await store.seedProject(devProject, process.env.ARCHETYPE_DEV_PROJECT_NAME ?? 'Order Claim Demo', (process.env.ARCHETYPE_DEV_ORIGINS ?? 'http://localhost:4173').split(','))
+  if (devProject) await store.seedProject(devProject, process.env.ARCHETYPE_DEV_PROJECT_NAME ?? 'Order Claim Demo', (process.env.ARCHETYPE_DEV_ORIGINS ?? 'http://localhost:4173').split(','), bootstrapOrganizationId)
   const server = await buildServer(store)
   await server.listen({ host: process.env.HOST ?? '0.0.0.0', port: Number(process.env.PORT ?? 8787) })
 }

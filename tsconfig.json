@@ -11,6 +11,7 @@
     { "path": "services/function-host" },
     { "path": "services/worker" },
     { "path": "examples/order-claim" },
+    { "path": "apps/console" },
     { "path": "apps/browser" }
   ]
 }

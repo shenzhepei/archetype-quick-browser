@@ -3,13 +3,45 @@ import type pg from 'pg'
 const schemaLock = 'archetype_platform_schema_v1'
 
 const platformSchema = `
+  CREATE TABLE IF NOT EXISTS organizations (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
   CREATE TABLE IF NOT EXISTS projects (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
+    organization_id TEXT REFERENCES organizations(id) ON DELETE CASCADE,
     allowed_origins TEXT[] NOT NULL DEFAULT '{}',
     oidc JSONB,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
   );
+  ALTER TABLE projects ADD COLUMN IF NOT EXISTS organization_id TEXT REFERENCES organizations(id) ON DELETE CASCADE;
+  CREATE TABLE IF NOT EXISTS control_memberships (
+    organization_id TEXT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+    subject TEXT NOT NULL,
+    display_name TEXT,
+    role TEXT NOT NULL CHECK (role IN ('owner', 'admin', 'developer', 'operator', 'auditor')),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (organization_id, subject)
+  );
+  CREATE TABLE IF NOT EXISTS control_sessions (
+    token_hash TEXT PRIMARY KEY,
+    subject TEXT NOT NULL,
+    display_name TEXT,
+    claims JSONB NOT NULL,
+    expires_at TIMESTAMPTZ NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
+  CREATE TABLE IF NOT EXISTS control_auth_transactions (
+    state_hash TEXT PRIMARY KEY,
+    verifier TEXT NOT NULL,
+    nonce TEXT NOT NULL,
+    return_to TEXT NOT NULL,
+    expires_at TIMESTAMPTZ NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
+  ALTER TABLE control_auth_transactions ADD COLUMN IF NOT EXISTS nonce TEXT;
   CREATE TABLE IF NOT EXISTS connections (
     project_id TEXT PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
     dialect TEXT NOT NULL CHECK (dialect IN ('postgres', 'mysql')),
@@ -78,7 +110,10 @@ const platformSchema = `
     attempts INTEGER NOT NULL,
     error TEXT NOT NULL,
     failed_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-  )
+  );
+  CREATE INDEX IF NOT EXISTS projects_organization_id_idx ON projects (organization_id);
+  CREATE INDEX IF NOT EXISTS control_memberships_subject_idx ON control_memberships (subject);
+  CREATE INDEX IF NOT EXISTS control_sessions_expires_at_idx ON control_sessions (expires_at)
 `
 
 export async function initializePlatformSchema(pool: pg.Pool): Promise<void> {

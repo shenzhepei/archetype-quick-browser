@@ -8,6 +8,7 @@
     "@archetype/db-adapters": "workspace:*",
     "@archetype/protocol": "workspace:*",
     "@fastify/cors": "catalog:",
+    "@fastify/static": "catalog:",
     "fastify": "catalog:",
     "jose": "catalog:",
     "pg": "catalog:",

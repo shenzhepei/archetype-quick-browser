@@ -48,6 +48,31 @@ describe.skipIf(!enabled)('platform persistence boundaries', () => {
     expect(await store.session(session.token)).toBeNull()
   })
 
+  test('persists one-time control login transactions and hashed control sessions', async () => {
+    const state = randomUUID()
+    await store.createControlTransaction(state, 'pkce-verifier', 'oidc-nonce', '/console/')
+    expect(await store.consumeControlTransaction(state)).toEqual({ verifier: 'pkce-verifier', nonce: 'oidc-nonce', returnTo: '/console/' })
+    expect(await store.consumeControlTransaction(state)).toBeNull()
+
+    const session = await store.createControlSession('control-user', 'Control User', { email: 'control@example.test' })
+    const raw = await store.pool.query('SELECT token_hash FROM control_sessions WHERE subject = $1', ['control-user'])
+    expect(raw.rows[0].token_hash).not.toBe(session.token)
+    expect((await store.controlSession(session.token))?.subject).toBe('control-user')
+    await store.revokeControlSession(session.token)
+    expect(await store.controlSession(session.token)).toBeNull()
+  })
+
+  test('persists organization roles and lists members without claims', async () => {
+    const organizationId = `organization-${randomUUID()}`
+    await store.ensureBootstrapOrganization(organizationId, 'Integration organization', ['owner-subject'])
+    await store.addControlMember(organizationId, 'auditor-subject', 'Audit User', 'auditor')
+    expect(await store.controlRole('auditor-subject', organizationId)).toBe('auditor')
+    expect(await store.controlMembers(organizationId)).toEqual([
+      { subject: 'auditor-subject', displayName: 'Audit User', role: 'auditor' },
+      { subject: 'owner-subject', role: 'owner' }
+    ])
+  })
+
   test('round-trips deployment operation descriptors through JSONB', async () => {
     const deployment = {
       projectId,
