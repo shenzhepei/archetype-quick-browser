@@ -70,7 +70,7 @@ pnpm dev
 | `examples/order-claim` | PostgreSQL/MySQL 并发与 Worker 示例 |
 | `infra/docker` | 自托管 Runtime 镜像与 Compose 栈 |
 
-[产品需求](docs/prd/02-Archetype-Runtime-PRD.md)与[详细设计](docs/detailed-design/02-Archetype-Runtime-Design.md)定义了安全和执行边界。
+[产品需求](docs/prd/01-Archetype-Runtime-PRD.md)与[详细设计](docs/detailed-design/01-Archetype-Runtime-Design.md)定义了安全和执行边界。
 
 ## 构建与发布
 

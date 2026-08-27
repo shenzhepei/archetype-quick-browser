@@ -1,9 +1,9 @@
-# 02 Archetype Runtime detailed design
+# 01 Archetype Runtime detailed design
 
 | Field | Value |
 | --- | --- |
 | Status | Released |
-| PRD | [02-Archetype-Runtime-PRD.md](../prd/02-Archetype-Runtime-PRD.md) |
+| PRD | [01-Archetype-Runtime-PRD.md](../prd/01-Archetype-Runtime-PRD.md) |
 
 ## Process boundaries
 

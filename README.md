@@ -70,7 +70,7 @@ See the [self-hosting guide](https://shenzhepei.github.io/archetype-runtime-brow
 | `examples/order-claim` | PostgreSQL/MySQL concurrency and worker example |
 | `infra/docker` | Self-hosted runtime images and Compose stack |
 
-The [product requirements](docs/prd/02-Archetype-Runtime-PRD.md) and [detailed design](docs/detailed-design/02-Archetype-Runtime-Design.md) define the security and execution boundaries.
+The [product requirements](docs/prd/01-Archetype-Runtime-PRD.md) and [detailed design](docs/detailed-design/01-Archetype-Runtime-Design.md) define the security and execution boundaries.
 
 ## Build And Release
 

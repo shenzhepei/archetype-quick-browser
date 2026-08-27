@@ -2,4 +2,4 @@
 
 | Specification | Product | Status |
 | --- | --- | --- |
-| [02](02-Archetype-Runtime-PRD.md) | Archetype Runtime | Released |
+| [01](01-Archetype-Runtime-PRD.md) | Archetype Runtime | Released |
