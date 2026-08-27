@@ -4,7 +4,7 @@
 
 - Docker with Compose
 - 4 CPU cores and 8 GB memory for the complete development stack
-- A random `ARCHETYPE_MASTER_KEY`, admin token, and service token
+- A random `ARCHETYPE_MASTER_KEY` and service token; administrator OIDC for production
 
 ```bash
 cp infra/docker/.env.example infra/docker/.env
@@ -13,12 +13,14 @@ docker-compose --env-file infra/docker/.env -f infra/docker/compose.yml up --bui
 
 The stack exposes Gateway on `http://localhost:8787` for development. Production deployments should enable the Caddy profile with a real hostname and HTTPS certificate.
 
+Open `http://localhost:8787/console/` for local administration. The example environment explicitly enables development login. In production, disable it and configure the administrator OIDC variables described in [Enterprise control plane](./control-plane).
+
 The Compose project contains Gateway, Function Host, Worker, platform PostgreSQL, example PostgreSQL, example MySQL, and Caddy. Only Gateway/Caddy is a public application boundary; databases and internal service ports should stay on the private Docker network.
 
 ## First deployment
 
 ```bash
-archetype project create --name "Shop"
+ARCHETYPE_ADMIN_TOKEN='...' archetype project create --name "Shop" --organization default
 archetype origin add --project PROJECT_ID --origin https://shop.example
 ARCHETYPE_DATABASE_URL='postgres://...' archetype db add --project PROJECT_ID --dialect postgres
 archetype deploy --project PROJECT_ID --entry src/functions/index.ts
@@ -29,7 +31,7 @@ Do not place database URLs in frontend environment variables or discovery files.
 
 ## Secrets
 
-Generate `ARCHETYPE_MASTER_KEY`, `ARCHETYPE_ADMIN_TOKEN`, and `ARCHETYPE_SERVICE_TOKEN` outside the repository. The Gateway creates a random data-encryption key for each database credential, encrypts the credential with AES-256-GCM, and wraps that data key with the installation master key. Back up the master key separately; losing it makes stored credentials unrecoverable.
+Generate `ARCHETYPE_MASTER_KEY`, optional CLI automation `ARCHETYPE_ADMIN_TOKEN`, and `ARCHETYPE_SERVICE_TOKEN` outside the repository. The Gateway creates a random data-encryption key for each database credential, encrypts the credential with AES-256-GCM, and wraps that data key with the installation master key. Back up the master key separately; losing it makes stored credentials unrecoverable.
 
 Rotate database passwords by running `db add` again. Rotate service/admin tokens during a maintenance window. Master-key rotation requires decrypting and rewrapping every stored data key and should be treated as an explicit migration.
 

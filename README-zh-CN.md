@@ -24,6 +24,7 @@ Archetype Runtime Browser 让顶层 HTTPS 应用通过 `navigator.archetype` 调
 ## 包含内容
 
 - Electron/Chromium 浏览器，支持多标签、导航、站点权限、Runtime 状态、主题，以及持久化的英文/简体中文界面。
+- 独立的企业控制台，用于组织身份、角色权限、项目、Origin、数据库绑定、应用 OIDC、成员和审计记录。
 - 仅向符合条件的顶层 HTTPS 与 localhost 页面提供冻结的 `navigator.archetype`。HTTP、文件页、内部页、iframe 和 Service Worker 均不注入。
 - Docker 自托管 Gateway、隔离函数宿主、可靠 Worker、平台 PostgreSQL、示例 PostgreSQL/MySQL，以及可选 Caddy 边缘服务。
 - 绑定 Origin 的设备密钥、OIDC Authorization Code + PKCE、60秒资源能力票据、签名调用证明、重放检测、审计，以及 AES-256-GCM 信封加密的数据库 Secret。
@@ -43,6 +44,8 @@ cp infra/docker/.env.example infra/docker/.env
 pnpm docker:up
 ```
 
+C 端浏览器默认打开普通新标签页。企业管理员使用 Gateway 的 `http://localhost:8787/console/`；浏览器中的 Runtime 详情只通过 `archetype://runtime` 按需打开。
+
 另开一个终端：
 
 ```bash
@@ -58,6 +61,7 @@ pnpm dev
 | 路径 | 职责 |
 | --- | --- |
 | `apps/browser` | Electron 浏览器外壳与页面 Runtime 桥接 |
+| `apps/console` | 使用 OIDC 会话和 RBAC 的企业控制台 |
 | `apps/docs` | 英文和简体中文 VitePress 文档 |
 | `services/gateway` | 发现、身份、策略、Secret、幂等、审计与路由 |
 | `services/function-host` | 校验摘要的 Node.js 函数子进程 |

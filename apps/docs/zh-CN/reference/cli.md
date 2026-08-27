@@ -13,4 +13,4 @@
 | `archetype logs` | 查看最近项目审计记录 |
 | `archetype well-known generate` | 生成同源发现文件 |
 
-管理请求使用 `ARCHETYPE_ADMIN_TOKEN`。数据库绑定从 `ARCHETYPE_DATABASE_URL` 读取，避免把连接串写在命令参数中。
+管理自动化请求必须显式配置 `ARCHETYPE_ADMIN_TOKEN`，不存在默认Token；`project create` 支持 `--organization`。人工管理员应使用OIDC企业控制台。数据库绑定从 `ARCHETYPE_DATABASE_URL` 读取，避免把连接串写在命令参数中。

@@ -4,7 +4,7 @@
 
 - Docker与Compose
 - 完整开发栈建议4核CPU和8GB内存
-- 随机的 `ARCHETYPE_MASTER_KEY`、管理员令牌和服务令牌
+- 随机的 `ARCHETYPE_MASTER_KEY` 和服务令牌；生产环境还需要管理员OIDC
 
 ```bash
 cp infra/docker/.env.example infra/docker/.env
@@ -13,10 +13,12 @@ docker-compose --env-file infra/docker/.env -f infra/docker/compose.yml up --bui
 
 开发栈在 `http://localhost:8787` 暴露Gateway。生产环境应启用Caddy配置，使用真实域名和HTTPS证书。
 
+本地管理入口是 `http://localhost:8787/console/`。示例环境显式启用开发登录；生产环境必须关闭它，并按照[企业控制面](./control-plane)配置管理员OIDC。
+
 Compose项目包含Gateway、Function Host、Worker、平台PostgreSQL、示例PostgreSQL、示例MySQL和Caddy。只有Gateway/Caddy是公开应用边界；数据库和内部服务端口应留在Docker私有网络。
 
 ```bash
-archetype project create --name "Shop"
+ARCHETYPE_ADMIN_TOKEN='...' archetype project create --name "Shop" --organization default
 archetype origin add --project PROJECT_ID --origin https://shop.example
 ARCHETYPE_DATABASE_URL='postgres://...' archetype db add --project PROJECT_ID --dialect postgres
 archetype deploy --project PROJECT_ID --entry src/functions/index.ts
@@ -27,7 +29,7 @@ archetype well-known generate --project PROJECT_ID --gateway https://runtime.exa
 
 ## Secret管理
 
-在仓库外生成 `ARCHETYPE_MASTER_KEY`、`ARCHETYPE_ADMIN_TOKEN` 和 `ARCHETYPE_SERVICE_TOKEN`。Gateway为每个数据库凭证生成随机数据密钥，用AES-256-GCM加密凭证，再用安装主密钥包裹数据密钥。主密钥必须单独备份，丢失后已保存凭证无法恢复。
+在仓库外生成 `ARCHETYPE_MASTER_KEY`、可选的CLI自动化 `ARCHETYPE_ADMIN_TOKEN` 和 `ARCHETYPE_SERVICE_TOKEN`。Gateway为每个数据库凭证生成随机数据密钥，用AES-256-GCM加密凭证，再用安装主密钥包裹数据密钥。主密钥必须单独备份，丢失后已保存凭证无法恢复。
 
 再次运行 `db add` 可以轮换数据库密码。服务和管理员Token应在维护窗口轮换。主密钥轮换需要解密并重新包裹所有数据密钥，应作为显式迁移执行。
 

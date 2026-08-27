@@ -2,7 +2,7 @@
 
 | Field | Value |
 | --- | --- |
-| Status | In progress |
+| Status | Released |
 | PRD | [02-Archetype-Runtime-PRD.md](../prd/02-Archetype-Runtime-PRD.md) |
 
 ## Process boundaries
@@ -28,6 +28,12 @@ Subscriptions use the same boundary with a topic-bound capability. The Electron 
 - Function Host verifies the deployment SHA-256, imports the bundled ESM module, and executes it in a bounded child process lifecycle.
 - DB adapters build Kysely PostgreSQL/MySQL connections, inject transactions and append events to the transaction-local outbox.
 - Worker leases outbox rows with `SKIP LOCKED`, copies events to the platform queue by unique event ID, then executes matching deployed workers with retries and dead-lettering.
+
+## Consumer and enterprise surfaces
+
+Electron opens `archetype://newtab` for consumers. `archetype://runtime` is a lightweight status page for the active site and is not an administration surface. Gateway separately serves the enterprise React console at `/console/`.
+
+Human control access uses administrator OIDC Authorization Code + PKCE. State, verifier and nonce are stored in a one-time PostgreSQL transaction; the session token is SHA-256 hashed at rest and delivered only in a same-origin HttpOnly cookie. Organization membership maps trusted OIDC subjects to owner, admin, developer, operator or auditor roles. Every control API repeats authorization server-side. JSON mutations also require the Gateway origin. The optional admin bearer token remains a separate CLI automation boundary and has no source-code default.
 
 ## Storage
 

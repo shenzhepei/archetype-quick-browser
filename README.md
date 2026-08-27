@@ -24,6 +24,7 @@ Archetype Runtime Browser lets a top-level HTTPS application call trusted, self-
 ## What It Includes
 
 - An Electron/Chromium browser with tabs, navigation, site permissions, runtime status, themes, and persistent English/Simplified Chinese localization.
+- A separate enterprise control console for organization identity, role-based access, projects, origins, database bindings, application OIDC, members, and audit records.
 - A frozen `navigator.archetype` API for eligible top-level HTTPS and localhost pages. HTTP, files, internal pages, iframes, and Service Workers are excluded.
 - A Docker self-hosted gateway, isolated function host, durable worker, platform PostgreSQL, example PostgreSQL/MySQL, and optional Caddy edge.
 - Origin-bound device keys, OIDC Authorization Code with PKCE, 60-second resource capabilities, signed invocation proofs, replay detection, auditing, and AES-256-GCM envelope-encrypted database secrets.
@@ -43,6 +44,8 @@ cp infra/docker/.env.example infra/docker/.env
 pnpm docker:up
 ```
 
+The consumer browser opens a neutral New Tab. Enterprise administrators use the Gateway console at `http://localhost:8787/console/`; runtime details remain available in the browser only through `archetype://runtime`.
+
 In another terminal:
 
 ```bash
@@ -58,6 +61,7 @@ See the [self-hosting guide](https://shenzhepei.github.io/archetype-runtime-brow
 | Path | Responsibility |
 | --- | --- |
 | `apps/browser` | Electron browser shell and page runtime bridge |
+| `apps/console` | Enterprise control console with OIDC sessions and RBAC |
 | `apps/docs` | English and Simplified Chinese VitePress documentation |
 | `services/gateway` | Discovery, identity, policy, secrets, idempotency, audit, and routing |
 | `services/function-host` | Digest-verified Node.js function subprocesses |

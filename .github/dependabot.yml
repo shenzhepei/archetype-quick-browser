@@ -13,6 +13,10 @@ updates:
     schedule:
       interval: weekly
   - package-ecosystem: npm
+    directory: /apps/console
+    schedule:
+      interval: weekly
+  - package-ecosystem: npm
     directory: /examples/order-claim
     schedule:
       interval: weekly

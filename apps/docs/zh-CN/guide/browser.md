@@ -1,6 +1,6 @@
 # 浏览器指南
 
-Archetype Runtime 是专注于应用运行的Electron Chromium浏览器。它保留熟悉的导航与标签页，并为配置过的HTTPS应用增加可信能力边界。
+Archetype Runtime 是面向C端用户的Electron Chromium浏览器。它默认打开普通新标签页，保留熟悉的导航与标签页，并为配置过的HTTPS应用增加可信能力边界。组织和项目管理位于独立的Gateway企业控制台。
 
 ## 安装与使用
 

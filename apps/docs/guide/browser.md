@@ -1,6 +1,6 @@
 # Browser guide
 
-Archetype Runtime is a focused Electron Chromium browser. It keeps navigation and tabs familiar while adding one capability boundary for configured HTTPS applications.
+Archetype Runtime is a consumer-facing Electron Chromium browser. It opens a neutral New Tab, keeps navigation and tabs familiar, and adds one capability boundary for configured HTTPS applications. Organization and project administration lives in the separate Gateway control console.
 
 ## Install and use
 

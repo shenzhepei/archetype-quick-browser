@@ -2,7 +2,7 @@
 
 | Field | Value |
 | --- | --- |
-| Status | In progress |
+| Status | Released |
 | Product | Archetype Runtime |
 | Detailed design | [02-Archetype-Runtime-Design.md](../detailed-design/02-Archetype-Runtime-Design.md) |
 
@@ -25,6 +25,7 @@ Archetype Runtime is an Electron Chromium application browser that gives every t
 | R02-09 | Developer workflow | CLI commands create projects, register origins/databases, build deployments, produce discovery files and read logs |
 | R02-10 | Documentation | A bilingual VitePress site documents browser, functions, data, queues, security, CLI and self-hosting |
 | R02-11 | Delivery | CI, Codecov, Pages and tag-triggered Windows/macOS GitHub Releases are automated |
+| R02-12 | Product separation | The consumer browser opens New Tab; enterprise administration is isolated in the Gateway console with OIDC and organization RBAC |
 
 ## Security invariants
 

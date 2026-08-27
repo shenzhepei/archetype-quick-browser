@@ -13,4 +13,4 @@
 | `archetype logs` | Read the latest project audit records |
 | `archetype well-known generate` | Create the same-origin discovery file |
 
-Administrative calls use `ARCHETYPE_ADMIN_TOKEN`. Database binding reads `ARCHETYPE_DATABASE_URL` so the URL does not need to appear as a command argument.
+Administrative automation calls require an explicitly configured `ARCHETYPE_ADMIN_TOKEN`; there is no default token. `project create` accepts `--organization`. Human administrators should use the OIDC-backed enterprise console instead. Database binding reads `ARCHETYPE_DATABASE_URL` so the URL does not need to appear as a command argument.

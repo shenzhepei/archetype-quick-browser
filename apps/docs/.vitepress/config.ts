@@ -4,6 +4,7 @@ const guide = [
   { text: 'Browser', link: '/guide/browser' },
   { text: 'Cloud functions', link: '/guide/functions' },
   { text: 'Data and jobs', link: '/guide/data-jobs' },
+  { text: 'Enterprise control', link: '/guide/control-plane' },
   { text: 'Self-hosting', link: '/guide/self-hosting' }
 ]
 
@@ -11,6 +12,7 @@ const zhGuide = [
   { text: '浏览器', link: '/zh-CN/guide/browser' },
   { text: '云函数', link: '/zh-CN/guide/functions' },
   { text: '数据与队列', link: '/zh-CN/guide/data-jobs' },
+  { text: '企业控制台', link: '/zh-CN/guide/control-plane' },
   { text: '自托管', link: '/zh-CN/guide/self-hosting' }
 ]
 
