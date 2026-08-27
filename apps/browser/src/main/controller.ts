@@ -18,18 +18,18 @@ export class BrowserController {
   constructor(private readonly window: BaseWindow, private readonly shell: WebContents, private readonly pagePreload: string, private readonly runtimeClient: RuntimeClient) {}
 
   initialize(): void {
-    this.createTab('archetype://runtime')
+    this.createTab('archetype://newtab')
   }
 
   state(): BrowserState {
     return { tabs: [...this.tabs.values()].map((tab) => ({ ...tab.state })), activeTabId: this.activeTabId, language: this.language, theme: this.theme, runtime: this.runtime }
   }
 
-  createTab(input = 'archetype://runtime'): void {
+  createTab(input = 'archetype://newtab'): void {
     const id = randomUUID()
     const url = normalizeAddress(input)
     const view = new WebContentsView({ webPreferences: { preload: this.pagePreload, sandbox: true, contextIsolation: true, nodeIntegration: false, partition: 'persist:archetype-runtime' } })
-    const record: TabRecord = { state: { id, title: url.startsWith('archetype:') ? 'Runtime' : 'New tab', url, loading: false, canGoBack: false, canGoForward: false }, view }
+    const record: TabRecord = { state: { id, title: this.internalTitle(url), url, loading: false, canGoBack: false, canGoForward: false }, view }
     this.tabs.set(id, record)
     this.bind(record)
     this.selectTab(id)
@@ -69,7 +69,7 @@ export class BrowserController {
     tab.state.url = url
     if (url.startsWith('archetype:')) {
       this.window.contentView.removeChildView(tab.view)
-      tab.state.title = 'Runtime'
+      tab.state.title = this.internalTitle(url)
       tab.state.loading = false
       this.publish()
       void this.refreshRuntime()
@@ -100,6 +100,12 @@ export class BrowserController {
     const tab = this.tabs.get(this.activeTabId)
     if (!tab) throw new Error('No active browser tab.')
     return tab
+  }
+
+  private internalTitle(url: string): string {
+    if (url === 'archetype://newtab') return 'New tab'
+    if (url.startsWith('archetype:')) return 'Runtime'
+    return 'New tab'
   }
 
   private bind(record: TabRecord): void {

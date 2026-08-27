@@ -8,7 +8,7 @@ void i18n.use(initReactI18next).init({
   resources: {
     en: { translation: {
       newTab: 'New tab', back: 'Back', forward: 'Forward', reload: 'Reload', address: 'Search or enter address',
-      runtime: 'Runtime', runtimeReady: 'Runtime connected', runtimeMissing: 'This site has not configured Archetype Runtime.',
+      runtime: 'Runtime', runtimeReady: 'Runtime connected', runtimeMissing: 'This site has not configured Archetype Runtime.', openRuntime: 'Open Runtime status',
       project: 'Project', operations: 'Operations', identity: 'Identity', signedOut: 'Not signed in', appearance: 'Appearance', language: 'Language',
       tabs: 'Tabs', closeTab: 'Close {{title}}', noProject: 'No project discovered', openConfiguredSite: 'Open a configured HTTPS application.',
       noOperations: 'No callable operations', originSession: 'Origin-bound OIDC session', authOnDemand: 'Authentication is requested by protected functions',
@@ -17,7 +17,7 @@ void i18n.use(initReactI18next).init({
     } },
     'zh-CN': { translation: {
       newTab: '新标签页', back: '后退', forward: '前进', reload: '刷新', address: '搜索或输入地址',
-      runtime: '运行时', runtimeReady: '运行时已连接', runtimeMissing: '此网站尚未配置 Archetype Runtime。',
+      runtime: '运行时', runtimeReady: '运行时已连接', runtimeMissing: '此网站尚未配置 Archetype Runtime。', openRuntime: '打开运行时状态',
       project: '项目', operations: '函数', identity: '身份', signedOut: '未登录', appearance: '外观', language: '语言',
       tabs: '标签页', closeTab: '关闭 {{title}}', noProject: '未发现项目', openConfiguredSite: '请打开已配置的 HTTPS 应用。',
       noOperations: '没有可调用函数', originSession: '绑定 Origin 的 OIDC 会话', authOnDemand: '受保护函数会按需请求身份验证',

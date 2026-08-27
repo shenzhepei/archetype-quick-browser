@@ -18,7 +18,7 @@ export function discoveryUrl(origin: string): string {
 
 export function normalizeAddress(input: string): string {
   const value = input.trim()
-  if (!value) return 'archetype://runtime'
+  if (!value) return 'archetype://newtab'
   if (/^(https?|archetype):/i.test(value)) return value
   if (/^(localhost|127\.0\.0\.1)(:\d+)?(\/|$)/i.test(value)) return `http://${value}`
   if (/^[\w-]+(\.[\w-]+)+(\/.*)?$/i.test(value)) return `https://${value}`

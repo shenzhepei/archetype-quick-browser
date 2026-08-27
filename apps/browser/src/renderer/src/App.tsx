@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowLeft, ArrowRight, Globe2, Moon, Plus, RefreshCw, ServerCog, Sun, X } from 'lucide-react'
+import { ArrowLeft, ArrowRight, Globe2, House, Moon, Plus, RefreshCw, ServerCog, Sun, X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import type { BrowserState } from '../../shared.js'
 import { persistPreferences, readPreferences } from './preferences.js'
 import { RuntimePage } from './RuntimePage.js'
+import { NewTabPage } from './NewTabPage.js'
 
 const initial: BrowserState = {
-  tabs: [{ id: 'preview', title: 'Runtime', url: 'archetype://runtime', loading: false, canGoBack: false, canGoForward: false }],
+  tabs: [{ id: 'preview', title: 'New tab', url: 'archetype://newtab', loading: false, canGoBack: false, canGoForward: false }],
   activeTabId: 'preview',
   language: 'en',
   theme: 'system',
@@ -17,7 +18,7 @@ export function App(): React.JSX.Element {
   const bridge = window.archetypeShell
   const [state, setState] = useState(initial)
   const active = useMemo(() => state.tabs.find((tab) => tab.id === state.activeTabId) ?? state.tabs[0]!, [state])
-  const [address, setAddress] = useState(active.url)
+  const [address, setAddress] = useState('')
   const contentRef = useRef<HTMLDivElement>(null)
   const { t, i18n } = useTranslation()
 
@@ -31,7 +32,7 @@ export function App(): React.JSX.Element {
     return unsubscribe
   }, [bridge])
 
-  useEffect(() => setAddress(active.url), [active.url])
+  useEffect(() => setAddress(active.url === 'archetype://newtab' ? '' : active.url), [active.url])
 
   useEffect(() => {
     void i18n.changeLanguage(state.language)
@@ -70,7 +71,7 @@ export function App(): React.JSX.Element {
     <nav className="tab-strip" aria-label={t('tabs')}>
       <div className="tabs">
         {state.tabs.map((tab) => <button className={`tab ${tab.id === state.activeTabId ? 'active' : ''}`} key={tab.id} onClick={() => void bridge.selectTab(tab.id)}>
-          {tab.loading ? <span className="spinner" /> : tab.url.startsWith('archetype:') ? <ServerCog size={15} /> : <Globe2 size={15} />}
+          {tab.loading ? <span className="spinner" /> : tab.url === 'archetype://newtab' ? <House size={15} /> : tab.url.startsWith('archetype:') ? <ServerCog size={15} /> : <Globe2 size={15} />}
           <span className="tab-title">{tab.title}</span>
           <span className="tab-close" role="button" aria-label={t('closeTab', { title: tab.title })} onClick={(event) => { event.stopPropagation(); void bridge.closeTab(tab.id) }}><X size={14} /></span>
         </button>)}
@@ -82,8 +83,8 @@ export function App(): React.JSX.Element {
       <button className="icon-button" disabled={!active.canGoForward} title={t('forward')} aria-label={t('forward')} onClick={() => void bridge.forward()}><ArrowRight size={18} /></button>
       <button className="icon-button" title={t('reload')} aria-label={t('reload')} onClick={() => void bridge.reload()}><RefreshCw size={17} /></button>
       <form className="address-form" onSubmit={(event) => { event.preventDefault(); void bridge.navigate(address) }}>
-        <span className={`runtime-dot ${state.runtime.configured ? 'connected' : ''}`} title={state.runtime.configured ? t('runtimeReady') : t('runtimeMissing')} />
-        <input value={address} onChange={(event) => setAddress(event.target.value)} aria-label={t('address')} spellCheck={false} />
+        <button type="button" className={`runtime-dot ${state.runtime.configured ? 'connected' : ''}`} title={t('openRuntime')} aria-label={t('openRuntime')} onClick={() => void bridge.navigate('archetype://runtime')} />
+        <input value={address} placeholder={t('address')} onChange={(event) => setAddress(event.target.value)} aria-label={t('address')} spellCheck={false} />
       </form>
       <div className="toolbar-divider" />
       <button className={`language-button ${state.language === 'en' ? 'active' : ''}`} onClick={() => updatePreferences({ language: 'en' })}>English</button>
@@ -93,7 +94,8 @@ export function App(): React.JSX.Element {
       </button>
     </div>
     <section className="content" ref={contentRef}>
-      {active.url.startsWith('archetype:') && <RuntimePage state={state} />}
+      {active.url === 'archetype://newtab' && <NewTabPage />}
+      {active.url === 'archetype://runtime' && <RuntimePage state={state} />}
     </section>
   </main>
 }

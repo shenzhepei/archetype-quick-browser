@@ -10,6 +10,7 @@ it('restricts Runtime injection to secure top-level origins and localhost', () =
 
 it('builds discovery and navigation URLs', () => {
   expect(discoveryUrl('https://shop.example')).toBe('https://shop.example/.well-known/archetype-runtime.json')
+  expect(normalizeAddress('  ')).toBe('archetype://newtab')
   expect(normalizeAddress('shop.example/orders')).toBe('https://shop.example/orders')
   expect(normalizeAddress('runtime functions')).toContain('google.com/search')
 })

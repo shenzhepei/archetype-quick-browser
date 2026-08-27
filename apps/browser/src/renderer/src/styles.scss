@@ -35,13 +35,15 @@ button { color: inherit; }
 .address-form { height: 31px; display: flex; align-items: center; gap: 9px; border: 1px solid #cdd5d1; border-radius: 6px; padding: 0 10px; background: #f7f9f8; }
 .address-form:focus-within { border-color: #087a57; box-shadow: 0 0 0 2px rgba(8, 122, 87, .12); }
 .address-form input { min-width: 0; width: 100%; border: 0; outline: 0; background: transparent; font-size: 13px; }
-.runtime-dot { width: 8px; height: 8px; border-radius: 50%; background: #9aa39f; flex: none; }
+.runtime-dot { width: 10px; height: 10px; padding: 0; border: 1px solid #fff; border-radius: 50%; background: #9aa39f; flex: none; cursor: pointer; }
 .runtime-dot.connected { background: #0a9368; box-shadow: 0 0 0 3px rgba(10, 147, 104, .12); }
 .toolbar-divider { width: 1px; height: 20px; background: #d9dfdc; }
 .language-button { height: 28px; padding: 0 7px; border: 0; background: transparent; border-radius: 4px; color: #5e6965; font-size: 11px; cursor: pointer; white-space: nowrap; }
 .language-button.active { background: #e5f2ed; color: #086447; font-weight: 650; }
 
 .content { min-height: 0; position: relative; background: #eef2f0; }
+.new-tab-page { height: 100%; display: grid; place-items: center; background: #f8faf9; }
+.new-tab-brand { display: flex; align-items: center; gap: 10px; color: #52605b; font-size: 18px; font-weight: 650; }
 .runtime-page { height: 100%; overflow: auto; padding: 48px clamp(24px, 6vw, 84px); background: #eef2f0; }
 .runtime-page > header { display: flex; align-items: center; gap: 14px; max-width: 980px; margin: 0 auto 30px; }
 .runtime-page h1 { margin: 0; font-size: 24px; line-height: 1.2; }
@@ -60,6 +62,7 @@ button { color: inherit; }
 [data-theme="dark"] .tab.active, [data-theme="dark"] .toolbar, [data-theme="dark"] .status-grid, [data-theme="dark"] .boundary-note { background: #202624; }
 [data-theme="dark"] .address-form { background: #171c1a; border-color: #3c4642; }
 [data-theme="dark"] .content, [data-theme="dark"] .runtime-page { background: #171c1a; }
+[data-theme="dark"] .new-tab-page { background: #171c1a; }
 [data-theme="dark"] .status-grid, [data-theme="dark"] .status-grid section { border-color: #343d39; }
 
 @media (max-width: 860px) {
