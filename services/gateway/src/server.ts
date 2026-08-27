@@ -13,7 +13,6 @@ import { deviceKeyDigest, issueCapability, verifyCapability } from './capability
 import { invocationDigest, verifyDeviceProof } from './device-proof.js'
 import { PlatformStore } from './store.js'
 
-const adminToken = process.env.ARCHETYPE_ADMIN_TOKEN
 const serviceToken = process.env.ARCHETYPE_SERVICE_TOKEN ?? 'development-service-token'
 const publicUrl = process.env.ARCHETYPE_PUBLIC_URL ?? 'http://localhost:8787'
 const deploymentsDirectory = process.env.ARCHETYPE_DEPLOYMENTS_DIR ?? join(process.cwd(), '.archetype', 'deployments')
@@ -25,6 +24,7 @@ function bearer(header: string | undefined): string | undefined {
 }
 
 function requireAdmin(header: string | undefined): void {
+  const adminToken = process.env.ARCHETYPE_ADMIN_TOKEN
   if (!adminToken || bearer(header) !== adminToken) throw Object.assign(new Error('Administrative automation token is invalid or disabled.'), { statusCode: 401 })
 }
 

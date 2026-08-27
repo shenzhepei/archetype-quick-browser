@@ -22,6 +22,7 @@ describe.skipIf(!enabled)('gateway capability and event boundaries', () => {
   let baseUrl = ''
 
   beforeAll(async () => {
+    process.env.ARCHETYPE_ADMIN_TOKEN = 'development-admin-token'
     await store.initialize()
     await store.seedProject(projectId, 'Gateway Integration', [origin])
     await store.setConnection(projectId, 'postgres', 'postgres://unused:unused@localhost/unused')
@@ -43,6 +44,7 @@ describe.skipIf(!enabled)('gateway capability and event boundaries', () => {
     vi.unstubAllGlobals()
     await server.close()
     await store.pool.end()
+    delete process.env.ARCHETYPE_ADMIN_TOKEN
   })
 
   async function capability(kind: 'invoke' | 'subscribe', resource: string): Promise<string> {
